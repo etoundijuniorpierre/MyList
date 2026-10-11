@@ -113,3 +113,15 @@ test('les mentions de version et d’édition partent en bloc', () => {
   assert.equal(cleanTitle('Assassins Creed Valhalla -EMPRESS'), 'Assassins Creed Valhalla')
   assert.equal(cleanTitle('Far.Cry.5-CODEX'), 'Far Cry 5')
 })
+
+test('les saisons en suffixe sans parenthèses quittent le titre, sans toucher un opus unique', () => {
+  assert.equal(cleanTitle('The Knick 1 2'), 'The Knick')
+  assert.equal(cleanTitle('Westworld 12 3 4'), 'Westworld')
+  assert.equal(cleanTitle('Far Cry 5'), 'Far Cry 5')
+  assert.equal(cleanTitle('Catch 22'), 'Catch 22')
+})
+
+test('les étiquettes de release en capitales partent sans manger les vrais mots', () => {
+  assert.equal(cleanTitle('The Winter King S01 WEB H264-FW'), 'The Winter King')
+  assert.equal(cleanTitle('Spider-Man Web of Shadows'), 'Spider-Man Web of Shadows')
+})

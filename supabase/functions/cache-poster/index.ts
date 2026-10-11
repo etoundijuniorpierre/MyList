@@ -8,7 +8,6 @@ const allowedHosts = new Set([
   'media.rawg.io',
   'images.igdb.com',
   'upload.wikimedia.org',
-  'image.tmdb.org',
   'cdn.akamai.steamstatic.com',
   'shared.akamai.steamstatic.com',
 ])

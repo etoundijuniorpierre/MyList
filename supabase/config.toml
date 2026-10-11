@@ -13,6 +13,3 @@ verify_jwt = true
 
 [functions.cache-poster]
 verify_jwt = true
-
-[functions.show-search]
-verify_jwt = true

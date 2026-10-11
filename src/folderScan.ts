@@ -67,6 +67,11 @@ export function cleanTitle(value: string, isFile = false): string {
     .replace(/\s*\((?:\d{1,2}[\s,]*)+\)\s*$/g, ' ')
     .replace(/\b(?:saison|season)[ ._-]*\d{1,3}\b|\bS\d{1,3}E\d{1,3}\b/gi, ' ')
     .replace(/\bS\d{1,2}(?:\s*[-–]\s*S?\d{1,2})?\b/gi, ' ')
+    // « The Knick 1 2 », « Westworld 12 3 4 » : liste de saisons sans parenthèses. Deux nombres ou plus
+    // pour ne pas toucher un opus unique comme « Far Cry 5 » ou un titre tel que « Catch 22 ».
+    .replace(/\s\d{1,2}(?:\s+\d{1,2})+\s*$/g, ' ')
+    // Étiquettes de release en capitales, retirées sans le drapeau i pour épargner les vrais mots (« Web of Shadows »).
+    .replace(/\b(?:WEB|EAC3|DDP?|AMZN|NF|DSNP|ATVP|HMAX|MAX|REMUX|PROPER|REPACK|FW)\b/g, ' ')
     // Retiré d'un bloc, sinon « Complete Edition » laisse « Edition » orphelin dans le titre.
     .replace(/\b(?:complete|definitive|ultimate|deluxe|gold|goty|game of the year|remastered?)\s+edition\b/gi, ' ')
     .replace(/\b(?:int[eé]grales?|integrales?|completes?|complets?|vostfr|truefrench|subfrench|dvdrip|brrip|bdrip|hdtv|hdlight|web[-_. ]?dl|ac3|aac|dts|h\.?26[45]|10bits?)\b/gi, ' ')

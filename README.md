@@ -39,7 +39,6 @@ Sans configuration Supabase, le site affiche un **mode démonstration** avec sep
    ```powershell
    npx supabase functions deploy admin-login
    npx supabase functions deploy game-search
-   npx supabase functions deploy show-search
    npx supabase functions deploy cache-poster
    ```
 
@@ -47,11 +46,10 @@ Sans configuration Supabase, le site affiche un **mode démonstration** avec sep
 
    | Secret | Sert à | Sans lui |
    | --- | --- | --- |
-   | `TMDB_API_KEY` ou `TMDB_ACCESS_TOKEN` | Séries et novelas | Repli sur TVMaze, nettement moins fourni pour les novelas |
-   | `RAWG_API_KEY` | Jeux PC | Repli sur Steam |
    | `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` | Jeux PC, fiche la plus riche | Repli sur RAWG puis Steam |
+   | `RAWG_API_KEY` | Jeux PC | Repli sur Steam |
 
-   La clé TMDB est gratuite et s'obtient en quelques minutes sur themoviedb.org. IGDB demande un compte développeur Twitch, et un partenariat IGDB pour un usage commercial.
+   IGDB demande un compte développeur Twitch (clé gratuite, sans paiement). RAWG fournit une clé gratuite. Sans aucune clé, les jeux passent par Steam, qui ne demande rien.
 5. Renseigner `.env.local` avec l’URL Supabase et la **clé publique/publishable**. Ne jamais mettre une clé secrète ou `service_role` dans une variable `VITE_`.
 
 ```dotenv
@@ -95,7 +93,7 @@ Cette routine sera active seulement après le déploiement et la configuration d
 
 ## Recherche des fiches
 
-- Séries et novelas : TMDB en priorité, qui couvre aussi les telenovelas latines et turques et leurs titres francophones ; TVMaze prend le relais sans clé TMDB.
+- Séries et novelas : TVMaze, sans clé. Il couvre bien les séries internationales ; pour les novelas dont le dossier porte un nom de doublage français, la correspondance automatique échoue souvent et la fiche se complète à la main.
 - Animés : Jikan, avec titre, affiche et genres.
 - Jeux PC : IGDB si les identifiants Twitch sont configurés, sinon RAWG, sinon **Steam**, qui ne demande aucune clé et fournit la jaquette portrait 600×900 du magasin.
 - Wikipédia complète les sources précédentes et sert de dernier recours ; les couvertures protégées n’y sont pas systématiquement disponibles.
