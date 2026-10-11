@@ -17,6 +17,10 @@ export function expandKnownAlias(title: string): string {
 }
 
 export function searchQueries(title: string): string[] {
-  const expanded = expandKnownAlias(title)
-  return expanded.toLowerCase() === title.trim().toLowerCase() ? [title.trim()] : [expanded, title.trim()]
+  const base = title.trim()
+  const expanded = expandKnownAlias(base)
+  const candidates = expanded.toLowerCase() === base.toLowerCase() ? [base] : [expanded, base]
+  // « Animal Kingdom 2016 » vient d'un nom de dossier : la fiche s'appelle « Animal Kingdom ».
+  const withoutYear = candidates.map((entry) => entry.replace(/\s+(?:19|20)\d{2}$/, '').trim()).filter(Boolean)
+  return [...new Set([...candidates, ...withoutYear])]
 }

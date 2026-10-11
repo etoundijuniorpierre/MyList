@@ -1,26 +1,24 @@
 import type { Category, MediaType, MetadataResult } from './types'
 import { normalizeTitle, titleKey } from './types'
 import { searchQueries } from './titleAliases'
+import { isExactTitle } from './titleMatch'
 import { supabase } from './supabase'
 
 type TvShow = { show: { id: number; name: string; summary: string | null; premiered: string | null; genres: string[]; image: { medium: string; original: string } | null; url: string } }
 type AnimeSearch = { data: { mal_id: number; title: string; title_english?: string | null; title_synonyms?: string[]; synopsis: string | null; year?: number | null; aired?: { from: string | null }; genres: { name: string }[]; images?: { jpg?: { large_image_url?: string; image_url?: string } }; url: string }[] }
 type GameSearch = { results: { id: number; name: string; released: string | null; background_image: string | null; genres: { name: string }[]; slug: string; source?: 'rawg' | 'igdb'; source_url?: string }[] }
+type ShowSearch = { results: { id: number; name: string; original_name: string | null; overview: string | null; released: string | null; poster_url: string | null; genres: string[]; source_url: string }[] }
 type WikiPage = { pageid: number; title: string; index?: number; pageimage?: string; thumbnail?: { source: string }; terms?: { description?: string[] } }
 type WikiSearch = { query?: { pages?: WikiPage[] } }
 
 const cachedSearches = new Map<string, Promise<MetadataResult[]>>()
 let rawgUnavailableUntil = 0
+let tmdbUnavailableUntil = 0
 
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12_000) })
   if (!response.ok) throw new Error(response.status === 429 ? 'Le service de fiches répond trop vite. Réessayez dans quelques instants.' : `Recherche indisponible (${response.status}).`)
   return response.json() as Promise<T>
-}
-
-function exactTitle(title: string, query: string) {
-  const normalized = normalizeTitle(title.replace(/\s*\([^)]*\)$/, ''))
-  return searchQueries(query).some((candidate) => normalized === normalizeTitle(candidate))
 }
 
 function plainText(html: string | null): string | null {
@@ -70,7 +68,7 @@ async function wikipedia(query: string, wanted: Category | null): Promise<Metada
           year: Number(description.match(/\b(18\d{2}|19\d{2}|20\d{2})\b/)?.[1]) || null,
           source: 'wikipedia', source_id: `${language}:${page.pageid}`, source_url: imageCredit ?? article,
           active: true, seasons_count: null, game_size_gb: null,
-          match: exactTitle(page.title, query) ? 'exact' : 'approximate',
+          match: isExactTitle(page.title, query) ? 'exact' : 'approximate',
         })
       }
       return found
@@ -89,7 +87,7 @@ async function tvmaze(query: string, category: 'series' | 'novelas'): Promise<Me
       genres: show.genres ?? [], year: show.premiered ? Number(show.premiered.slice(0, 4)) : null,
       source: 'tvmaze', source_id: String(show.id), source_url: show.url,
       active: true, seasons_count: null, game_size_gb: null,
-      match: exactTitle(show.name, query) ? 'exact' : 'approximate',
+      match: isExactTitle(show.name, query) ? 'exact' : 'approximate',
     }))
     if (matches.some((item) => item.match === 'exact') || index === queries.length - 1) return matches
   }
@@ -108,7 +106,7 @@ async function jikan(query: string): Promise<MetadataResult[]> {
       year: anime.year ?? (anime.aired?.from ? Number(anime.aired.from.slice(0, 4)) : null),
       source: 'jikan-anime', source_id: String(anime.mal_id), source_url: anime.url,
       active: true, seasons_count: null, game_size_gb: null,
-      match: [anime.title, anime.title_english, ...(anime.title_synonyms ?? [])].some((title) => title && exactTitle(title, query)) ? 'exact' : 'approximate',
+      match: [anime.title, anime.title_english, ...(anime.title_synonyms ?? [])].some((title) => title && isExactTitle(title, query)) ? 'exact' : 'approximate',
     }))
     if (matches.some((item) => item.match === 'exact') || index === queries.length - 1) return matches
   }
@@ -126,17 +124,38 @@ async function rawg(query: string): Promise<MetadataResult[]> {
       year: game.released ? Number(game.released.slice(0, 4)) : null,
       source: game.source ?? 'rawg', source_id: String(game.id), source_url: game.source_url ?? `https://rawg.io/games/${game.slug}`,
       active: true, seasons_count: null, game_size_gb: null,
-      match: exactTitle(game.name, query) ? 'exact' : 'approximate',
+      match: isExactTitle(game.name, query) ? 'exact' : 'approximate',
     }))
   } catch { rawgUnavailableUntil = Date.now() + 5 * 60_000; return [] }
+}
+
+async function tmdb(query: string, category: 'series' | 'novelas'): Promise<MetadataResult[]> {
+  if (!supabase || Date.now() < tmdbUnavailableUntil) return []
+  try {
+    const { data, error } = await supabase.functions.invoke<ShowSearch>('show-search', { body: { query: searchQueries(query)[0], category }, signal: AbortSignal.timeout(12_000) })
+    if (error || !data) throw error ?? new Error('Recherche indisponible')
+    return data.results.map((show) => ({
+      category, media_type: null, title: show.name, title_key: titleKey(category, null, show.name),
+      synopsis: show.overview, poster_url: show.poster_url, genres: show.genres ?? [],
+      year: show.released ? Number(show.released.slice(0, 4)) : null,
+      source: 'tmdb', source_id: String(show.id), source_url: show.source_url,
+      active: true, seasons_count: null, game_size_gb: null,
+      match: [show.name, show.original_name].some((title) => title && isExactTitle(title, query)) ? 'exact' : 'approximate',
+    }))
+  } catch { tmdbUnavailableUntil = Date.now() + 5 * 60_000; return [] }
 }
 
 async function lookup(query: string, category: Category): Promise<MetadataResult[]> {
   if (query.trim().length < 2) return []
   let main: MetadataResult[] = []
   try {
-    if (category === 'series' || category === 'novelas') main = await tvmaze(query, category)
-    else if (category === 'anime') main = await jikan(query)
+    if (category === 'series' || category === 'novelas') {
+      main = await tmdb(query, category)
+      if (!main.some((entry) => entry.match === 'exact' && entry.poster_url)) {
+        const seen = new Set(main.map((entry) => entry.title_key))
+        main = [...main, ...(await tvmaze(query, category)).filter((entry) => !seen.has(entry.title_key))]
+      }
+    } else if (category === 'anime') main = await jikan(query)
     else main = await rawg(query)
   } catch { /* La source gratuite de repli reste disponible. */ }
   if (main.some((entry) => entry.match === 'exact' && entry.poster_url && entry.genres.length)) return main
@@ -164,6 +183,11 @@ export async function identifyMetadata(query: string, guessedCategory: Category)
   return specific.find((entry) => entry.match === 'exact') ?? detected
 }
 
+const posterHosts = [
+  'static.tvmaze.com', 'cdn.myanimelist.net', 'media.rawg.io', 'images.igdb.com', 'upload.wikimedia.org',
+  'image.tmdb.org', 'cdn.akamai.steamstatic.com', 'shared.akamai.steamstatic.com',
+]
+
 export function isCachedPosterUrl(url: string | null): boolean {
   return Boolean(url && import.meta.env.VITE_SUPABASE_URL && url.startsWith(`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/posters/`))
 }
@@ -172,7 +196,7 @@ export async function cachePosterUrl(url: string | null): Promise<string | null>
   if (!url || !supabase || isCachedPosterUrl(url)) return url
   let hostname: string
   try { hostname = new URL(url).hostname } catch { return url }
-  if (!['static.tvmaze.com', 'cdn.myanimelist.net', 'media.rawg.io', 'images.igdb.com', 'upload.wikimedia.org'].includes(hostname)) return url
+  if (!posterHosts.includes(hostname)) return url
   try {
     const { data, error } = await supabase.functions.invoke<{ url: string }>('cache-poster', { body: { url }, signal: AbortSignal.timeout(20_000) })
     return !error && data?.url?.startsWith(`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/posters/`) ? data.url : url
