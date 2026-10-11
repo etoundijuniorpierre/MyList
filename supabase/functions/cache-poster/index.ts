@@ -10,6 +10,7 @@ const allowedHosts = new Set([
   'upload.wikimedia.org',
   'cdn.akamai.steamstatic.com',
   'shared.akamai.steamstatic.com',
+  'artworks.thetvdb.com',
 ])
 const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const maxBytes = 5 * 1024 * 1024

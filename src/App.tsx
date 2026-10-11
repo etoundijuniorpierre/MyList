@@ -29,7 +29,7 @@ function formatPrice(amount: number, currency: string) {
 }
 
 const sourceNames: Record<string, string> = {
-  tvmaze: 'TVMaze', rawg: 'RAWG', igdb: 'IGDB', steam: 'Steam', 'jikan-anime': 'MyAnimeList',
+  tvmaze: 'TVMaze', tvdb: 'TheTVDB', rawg: 'RAWG', igdb: 'IGDB', steam: 'Steam', 'jikan-anime': 'MyAnimeList',
 }
 
 function sourceLabel(source: string, posterUrl: string | null) {
@@ -160,7 +160,7 @@ function App() {
       <Route path="*" element={<Navigate to="/series" replace />} />
     </Routes>
 
-    <footer className="site-footer"><div><span className="footer-brand">MA LISTE<span>.</span></span><p>Votre prochaine découverte commence ici.</p><p className="source-credit">Fiches : <a href="https://www.tvmaze.com/" target="_blank" rel="noopener noreferrer">TVMaze</a> · <a href="https://jikan.moe/" target="_blank" rel="noopener noreferrer">Jikan</a> · <a href="https://www.wikipedia.org/" target="_blank" rel="noopener noreferrer">Wikipédia</a> · <a href="https://www.igdb.com/" target="_blank" rel="noopener noreferrer">IGDB</a> · <a href="https://rawg.io/" target="_blank" rel="noopener noreferrer">RAWG</a> · <a href="https://store.steampowered.com/" target="_blank" rel="noopener noreferrer">Steam</a></p></div><div className="footer-links">{categories.map((category) => <Link key={category.key} to={routes[category.key]}>{category.label}</Link>)}</div><small>© {new Date().getFullYear()} Ma Liste</small></footer>
+    <footer className="site-footer"><div><span className="footer-brand">MA LISTE<span>.</span></span><p>Votre prochaine découverte commence ici.</p><p className="source-credit">Fiches : <a href="https://www.tvmaze.com/" target="_blank" rel="noopener noreferrer">TVMaze</a> · <a href="https://www.thetvdb.com/" target="_blank" rel="noopener noreferrer">TheTVDB</a> · <a href="https://jikan.moe/" target="_blank" rel="noopener noreferrer">Jikan</a> · <a href="https://www.wikipedia.org/" target="_blank" rel="noopener noreferrer">Wikipédia</a> · <a href="https://www.igdb.com/" target="_blank" rel="noopener noreferrer">IGDB</a> · <a href="https://rawg.io/" target="_blank" rel="noopener noreferrer">RAWG</a> · <a href="https://store.steampowered.com/" target="_blank" rel="noopener noreferrer">Steam</a></p></div><div className="footer-links">{categories.map((category) => <Link key={category.key} to={routes[category.key]}>{category.label}</Link>)}</div><small>© {new Date().getFullYear()} Ma Liste</small></footer>
   </div>
 }
 

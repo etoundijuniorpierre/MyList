@@ -8,11 +8,13 @@ import { supabase } from './supabase'
 type TvShow = { show: { id: number; name: string; summary: string | null; premiered: string | null; genres: string[]; image: { medium: string; original: string } | null; url: string } }
 type AnimeSearch = { data: { mal_id: number; title: string; title_english?: string | null; title_synonyms?: string[]; synopsis: string | null; year?: number | null; aired?: { from: string | null }; genres: { name: string }[]; images?: { jpg?: { large_image_url?: string; image_url?: string } }; url: string }[] }
 type GameSearch = { results: { id: number; name: string; released: string | null; background_image: string | null; genres: { name: string }[]; slug: string; source?: 'rawg' | 'igdb'; source_url?: string }[] }
+type TvdbSearch = { results: { id: string; name: string; aliases: string[]; overview: string | null; released: string | null; poster_url: string | null; genres: string[] }[] }
 type WikiPage = { pageid: number; title: string; index?: number; pageimage?: string; thumbnail?: { source: string }; terms?: { description?: string[] } }
 type WikiSearch = { query?: { pages?: WikiPage[] } }
 
 const cachedSearches = new Map<string, Promise<MetadataResult[]>>()
 let rawgUnavailableUntil = 0
+let tvdbUnavailableUntil = 0
 
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12_000) })
@@ -128,12 +130,35 @@ async function rawg(query: string): Promise<MetadataResult[]> {
   } catch { rawgUnavailableUntil = Date.now() + 5 * 60_000; return [] }
 }
 
+async function tvdb(query: string, category: 'series' | 'novelas'): Promise<MetadataResult[]> {
+  if (!supabase || Date.now() < tvdbUnavailableUntil) return []
+  try {
+    const { data, error } = await supabase.functions.invoke<TvdbSearch>('tvdb-search', { body: { query: searchQueries(query)[0] }, signal: AbortSignal.timeout(12_000) })
+    if (error || !data) throw error ?? new Error('Recherche indisponible')
+    return data.results.map((show) => ({
+      category, media_type: null, title: show.name, title_key: titleKey(category, null, show.name),
+      synopsis: show.overview, poster_url: show.poster_url, genres: show.genres ?? [],
+      year: show.released ? Number(show.released.slice(0, 4)) : null,
+      source: 'tvdb', source_id: show.id, source_url: `https://www.thetvdb.com/dereferrer/series/${show.id}`,
+      active: true, seasons_count: null, game_size_gb: null,
+      // Le nom du dossier (doublage FR) est comparé au titre et à ses alias multilingues.
+      match: [show.name, ...show.aliases].some((title) => title && isExactTitle(title, query)) ? 'exact' : 'approximate',
+    }))
+  } catch { tvdbUnavailableUntil = Date.now() + 5 * 60_000; return [] }
+}
+
 async function lookup(query: string, category: Category): Promise<MetadataResult[]> {
   if (query.trim().length < 2) return []
   let main: MetadataResult[] = []
   try {
-    if (category === 'series' || category === 'novelas') main = await tvmaze(query, category)
-    else if (category === 'anime') main = await jikan(query)
+    if (category === 'series' || category === 'novelas') {
+      main = await tvmaze(query, category)
+      // TVMaze (sans clé) d'abord ; TheTVDB complète surtout les novelas au nom de doublage.
+      if (!main.some((entry) => entry.match === 'exact' && entry.poster_url && entry.genres.length)) {
+        const seen = new Set(main.map((entry) => entry.title_key))
+        main = [...main, ...(await tvdb(query, category)).filter((entry) => !seen.has(entry.title_key))]
+      }
+    } else if (category === 'anime') main = await jikan(query)
     else main = await rawg(query)
   } catch { /* La source gratuite de repli reste disponible. */ }
   if (main.some((entry) => entry.match === 'exact' && entry.poster_url && entry.genres.length)) return main
@@ -166,7 +191,7 @@ export async function identifyMetadata(query: string, guessedCategory: Category)
 
 const posterHosts = [
   'static.tvmaze.com', 'cdn.myanimelist.net', 'media.rawg.io', 'images.igdb.com', 'upload.wikimedia.org',
-  'cdn.akamai.steamstatic.com', 'shared.akamai.steamstatic.com',
+  'cdn.akamai.steamstatic.com', 'shared.akamai.steamstatic.com', 'artworks.thetvdb.com',
 ]
 
 export function isCachedPosterUrl(url: string | null): boolean {
