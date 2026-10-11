@@ -9,7 +9,7 @@ require.extensions['.ts'] = (module, filename) => {
   module._compile(compiled.outputText, filename)
 }
 
-const { scanFolder } = require('../src/folderScan.ts')
+const { scanFolder, cleanTitle } = require('../src/folderScan.ts')
 const file = (path, size) => ({ name: path.split('/').at(-1), webkitRelativePath: path, size })
 
 test('une collection de jeux produit une fiche par sous-dossier et garde chaque taille', () => {
@@ -99,4 +99,17 @@ test('les dossiers techniques comme Crack ou Bonuses ne deviennent pas des fiche
 test('un titre à tiret interne reste intact', () => {
   const result = scanFolder([file('Series/Spider-Man/S01/ep01.mkv', 1e9)])
   assert.equal(result[0].title, 'Spider-Man')
+})
+
+test('le nettoyage ne mange pas de mots qui appartiennent au titre', () => {
+  assert.equal(cleanTitle('Gears of War Reloaded'), 'Gears of War Reloaded')
+  assert.equal(cleanTitle('Spider-Man'), 'Spider-Man')
+  assert.equal(cleanTitle('Law & Order - SVU'), 'Law & Order - SVU')
+})
+
+test('les mentions de version et d’édition partent en bloc', () => {
+  assert.equal(cleanTitle('Horizon Forbidden West Complete Edition'), 'Horizon Forbidden West')
+  assert.equal(cleanTitle('Grand Theft Auto IV Complete Edition'), 'Grand Theft Auto IV')
+  assert.equal(cleanTitle('Assassins Creed Valhalla -EMPRESS'), 'Assassins Creed Valhalla')
+  assert.equal(cleanTitle('Far.Cry.5-CODEX'), 'Far Cry 5')
 })

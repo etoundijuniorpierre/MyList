@@ -2,6 +2,7 @@ import type { Category, MediaType, MetadataResult } from './types'
 import { normalizeTitle, titleKey } from './types'
 import { searchQueries } from './titleAliases'
 import { isExactTitle } from './titleMatch'
+import { cleanTitle } from './folderScan'
 import { supabase } from './supabase'
 
 type TvShow = { show: { id: number; name: string; summary: string | null; premiered: string | null; genres: string[]; image: { medium: string; original: string } | null; url: string } }
@@ -166,20 +167,23 @@ async function lookup(query: string, category: Category): Promise<MetadataResult
 }
 
 export function searchMetadata(query: string, category: Category, _mediaType: MediaType = null): Promise<MetadataResult[]> {
-  const key = `${category}:${normalizeTitle(query)}`
+  // Les fiches déjà en base gardent le nom du dossier d'origine : on le nettoie avant d'interroger les sources.
+  const search = cleanTitle(query) || query.trim()
+  const key = `${category}:${normalizeTitle(search)}`
   const hit = cachedSearches.get(key)
   if (hit) return hit
-  const pending = lookup(query, category).catch((error) => { cachedSearches.delete(key); throw error })
+  const pending = lookup(search, category).catch((error) => { cachedSearches.delete(key); throw error })
   if (cachedSearches.size > 300) cachedSearches.clear()
   cachedSearches.set(key, pending)
   return pending
 }
 
 export async function identifyMetadata(query: string, guessedCategory: Category): Promise<MetadataResult | null> {
-  const wiki = await wikipedia(searchQueries(query)[0], null)
+  const search = cleanTitle(query) || query.trim()
+  const wiki = await wikipedia(searchQueries(search)[0], null)
   const detected = wiki.find((entry) => entry.match === 'exact' && entry.category !== guessedCategory)
   if (!detected) return null
-  const specific = await searchMetadata(query, detected.category)
+  const specific = await searchMetadata(search, detected.category)
   return specific.find((entry) => entry.match === 'exact') ?? detected
 }
 

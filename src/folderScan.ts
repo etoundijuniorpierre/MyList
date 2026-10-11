@@ -54,18 +54,21 @@ export function seasonsFromSuffix(name: string): number | null {
   return numbers.length ? Math.max(...numbers) : null
 }
 
-function cleanTitle(value: string, isFile = false): string {
+export function cleanTitle(value: string, isFile = false): string {
   let title = isFile ? value.replace(/\.(?:iso|zip|rar|7z|exe|msi|mkv|mp4|avi|mov|m4v|wmv|webm|ts)$/i, '') : value
   title = title.replace(/\[[^\]]*\]/g, ' ')
     .replace(/\((?:www\.[^)]*|[^)]*\.(?:com|net|org))\)/gi, ' ')
     .replace(/^(?:rune|tenoke|dodi|fitgirl|corepack|empress|codex|skidrow|reloaded|plaza|hoodlum|razor1911|elamigos|xatab|kaos|flt|tinyiso|gog|masquerade|online[-_. ]?fix)[-_. ]+/i, ' ')
-    .replace(/(?:[-_. ]+(?:CODEX|SKIDROW|RELOADED|Mephisto|STEAMPUNKS|SiMON|KAMUi|ElA|Black_Box|P2P))$/i, ' ')
+    // Le groupe de release est collé par un tiret ou un point ; sinon « Gears of War Reloaded » perdrait un mot du titre.
+    .replace(/(?:[-_.]+\s*(?:CODEX|SKIDROW|RELOADED|Mephisto|STEAMPUNKS|SiMON|KAMUi|ElA|Black_Box|P2P))$/i, ' ')
     .replace(/\b(?:v[._ ]?\d+(?:[._]\d+)+|incl[._ ]*\d+[._ ]*DLC|FRENCH|MULTI\d*|REPACK)\b/gi, ' ')
     .replace(/\bby[._ ]+xatab\b/gi, ' ')
     .replace(/\(\d{4}\)$/g, ' ')
     .replace(/\s*\((?:\d{1,2}[\s,]*)+\)\s*$/g, ' ')
     .replace(/\b(?:saison|season)[ ._-]*\d{1,3}\b|\bS\d{1,3}E\d{1,3}\b/gi, ' ')
     .replace(/\bS\d{1,2}(?:\s*[-–]\s*S?\d{1,2})?\b/gi, ' ')
+    // Retiré d'un bloc, sinon « Complete Edition » laisse « Edition » orphelin dans le titre.
+    .replace(/\b(?:complete|definitive|ultimate|deluxe|gold|goty|game of the year|remastered?)\s+edition\b/gi, ' ')
     .replace(/\b(?:int[eé]grales?|integrales?|completes?|complets?|vostfr|truefrench|subfrench|dvdrip|brrip|bdrip|hdtv|hdlight|web[-_. ]?dl|ac3|aac|dts|h\.?26[45]|10bits?)\b/gi, ' ')
     .replace(/\b(?:1080p|720p|2160p|x264|x265|hevc|bluray|webrip)\b/gi, ' ')
     .replace(/[._]+/g, ' ')
