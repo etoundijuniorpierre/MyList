@@ -53,3 +53,50 @@ test('un dossier avec des fichiers de jeu directs ne se découpe pas par erreur'
   assert.equal(result.filter((item) => item.selected).length, 1)
   assert.equal(result[0].game_size_gb, 7)
 })
+
+test('les titres de dossiers bruités sont nettoyés avant la recherche', () => {
+  const result = scanFolder([
+    file('Series/[ Torrent911 eu ] Blacklist/S01/ep01.mkv', 1e9),
+    file('Series/Teen Wolf INTEGRALE BRRip -CHiLL/S01/ep01.mkv', 1e9),
+    file('Series/Bandidos S01/ep01.mkv', 1e9),
+    file('Jeux PC/tenoke-slitterhead/game.iso', 8e9),
+    file('Jeux PC/rune-virtua fighter 5 revo world stage/game.iso', 9e9),
+  ])
+  const titles = result.map((item) => item.title)
+  assert.deepEqual(titles.sort(), [
+    'Bandidos', 'Blacklist', 'Teen Wolf', 'slitterhead', 'virtua fighter 5 revo world stage',
+  ].sort())
+})
+
+test('le suffixe « (2) » du dossier donne le nombre de saisons et quitte le titre', () => {
+  const result = scanFolder([
+    file('Series/ATLANTA (2)/ep01.mkv', 1e9),
+    file('Series/BARBARIENS (1 2)/ep01.mkv', 1e9),
+  ])
+  assert.deepEqual(result.map((item) => [item.title, item.seasons_count]), [
+    ['ATLANTA', 2], ['BARBARIENS', 2],
+  ])
+})
+
+test('les saisons réellement détectées priment sur le suffixe du dossier', () => {
+  const result = scanFolder([
+    file('Series/ALIAS (5)/Saison 1/ep01.mkv', 1e9),
+    file('Series/ALIAS (5)/Saison 2/ep01.mkv', 1e9),
+    file('Series/ALIAS (5)/Saison 3/ep01.mkv', 1e9),
+  ])
+  assert.equal(result[0].seasons_count, 3)
+})
+
+test('les dossiers techniques comme Crack ou Bonuses ne deviennent pas des fiches', () => {
+  const result = scanFolder([
+    file('Jeux PC/Cyberpunk 2077/Crack/crack.exe', 1e8),
+    file('Jeux PC/Cyberpunk 2077/Bonuses/art.bin', 2e8),
+    file('Jeux PC/Cyberpunk 2077/bin/game.exe', 9e9),
+  ])
+  assert.deepEqual(result.map((item) => item.title), ['Cyberpunk 2077'])
+})
+
+test('un titre à tiret interne reste intact', () => {
+  const result = scanFolder([file('Series/Spider-Man/S01/ep01.mkv', 1e9)])
+  assert.equal(result[0].title, 'Spider-Man')
+})
