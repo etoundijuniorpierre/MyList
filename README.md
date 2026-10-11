@@ -34,7 +34,24 @@ Sans configuration Supabase, le site affiche un **mode démonstration** avec sep
    ```
 
    Le nom d’utilisateur accepte 3 à 32 caractères : lettres minuscules, chiffres et `_`. L’e-mail reste privé dans la base ; l’admin se connecte avec **username + mot de passe** via la fonction serveur.
-4. Déployer les Edge Functions avec `npx supabase functions deploy admin-login`, `npx supabase functions deploy game-search` et `npx supabase functions deploy cache-poster`, en conservant la configuration de [`supabase/config.toml`](supabase/config.toml). Définir `ALLOWED_ORIGINS` (URL du site, sans `/` final ; plusieurs origines séparées par des virgules). Pour les jeux, `IGDB_CLIENT_ID` et `IGDB_CLIENT_SECRET` sont des options nécessitant un compte développeur Twitch et un partenariat IGDB pour un usage commercial ; `RAWG_API_KEY` est une autre option selon le plan adapté. Ces secrets restent côté serveur.
+4. Déployer les Edge Functions :
+
+   ```powershell
+   npx supabase functions deploy admin-login
+   npx supabase functions deploy game-search
+   npx supabase functions deploy show-search
+   npx supabase functions deploy cache-poster
+   ```
+
+   Conserver la configuration de [`supabase/config.toml`](supabase/config.toml) et définir `ALLOWED_ORIGINS` (URL du site, sans `/` final ; plusieurs origines séparées par des virgules). Les clés de catalogue sont toutes facultatives et restent côté serveur :
+
+   | Secret | Sert à | Sans lui |
+   | --- | --- | --- |
+   | `TMDB_API_KEY` ou `TMDB_ACCESS_TOKEN` | Séries et novelas | Repli sur TVMaze, nettement moins fourni pour les novelas |
+   | `RAWG_API_KEY` | Jeux PC | Repli sur Steam |
+   | `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` | Jeux PC, fiche la plus riche | Repli sur RAWG puis Steam |
+
+   La clé TMDB est gratuite et s'obtient en quelques minutes sur themoviedb.org. IGDB demande un compte développeur Twitch, et un partenariat IGDB pour un usage commercial.
 5. Renseigner `.env.local` avec l’URL Supabase et la **clé publique/publishable**. Ne jamais mettre une clé secrète ou `service_role` dans une variable `VITE_`.
 
 ```dotenv
@@ -78,10 +95,13 @@ Cette routine sera active seulement après le déploiement et la configuration d
 
 ## Recherche des fiches
 
-- Séries et novelas : TVMaze, avec titre, affiche et genres.
+- Séries et novelas : TMDB en priorité, qui couvre aussi les telenovelas latines et turques et leurs titres francophones ; TVMaze prend le relais sans clé TMDB.
 - Animés : Jikan, avec titre, affiche et genres.
-- Jeux PC : IGDB en priorité si les identifiants Twitch et l’accord commercial sont configurés ; RAWG peut servir de second choix avec une clé et un plan adaptés. Sans ces accès, Wikipédia peut fournir une fiche et parfois une image libre, mais les couvertures de jeux protégées ne sont pas systématiquement disponibles.
+- Jeux PC : IGDB si les identifiants Twitch sont configurés, sinon RAWG, sinon **Steam**, qui ne demande aucune clé et fournit la jaquette portrait 600×900 du magasin.
+- Wikipédia complète les sources précédentes et sert de dernier recours ; les couvertures protégées n’y sont pas systématiquement disponibles.
 - En cas de fiche absente ou incomplète, l’admin peut saisir ou corriger les données à la main.
+
+Les noms de dossiers sont nettoyés avant la recherche : préfixes de groupe (`tenoke-`, `rune-`), crochets de tracker, mentions `INTEGRALE`, `BRRip`, `VOSTFR`, marqueurs de saison (`S01`) et suffixe de saisons (`(2)`, `(1 2)`) — ce dernier sert alors de nombre de saisons quand les fichiers ne l’indiquent pas. La comparaison avec les fiches trouvées tolère un article manquant, une faute de frappe et un sigle ponctué, mais refuse deux opus différents : « Far Cry 2 » ne sera jamais rapproché de « Far Cry 3 ».
 
 L’import de plusieurs titres propose une vérification avant enregistrement. Les correspondances incertaines ne sont pas cochées par défaut. Les abréviations courantes telles que `GOW`, `GTA`, `COD`, `RDR`, `NFS` et `TLOU` sont développées pour améliorer la recherche. Wikipédia en anglais, français et espagnol complète les sources existantes et peut aider à reconnaître une catégorie lorsque le dossier ne l’indique pas. Une contrainte unique par catégorie en base et une vérification dans l’interface empêchent les doublons ; une fiche déjà présente est mise à jour.
 

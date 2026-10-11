@@ -8,6 +8,9 @@ const allowedHosts = new Set([
   'media.rawg.io',
   'images.igdb.com',
   'upload.wikimedia.org',
+  'image.tmdb.org',
+  'cdn.akamai.steamstatic.com',
+  'shared.akamai.steamstatic.com',
 ])
 const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const maxBytes = 5 * 1024 * 1024

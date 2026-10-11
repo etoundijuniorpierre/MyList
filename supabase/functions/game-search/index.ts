@@ -33,6 +33,63 @@ async function searchIgdb(query: string, clientId: string, clientSecret: string)
   }))
 }
 
+type SteamDetails = { released: string | null; genres: { name: string }[]; header: string | null }
+
+async function steamDetails(appId: number): Promise<SteamDetails | null> {
+  try {
+    const url = new URL('https://store.steampowered.com/api/appdetails')
+    url.searchParams.set('appids', String(appId))
+    url.searchParams.set('l', 'french')
+    const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8_000) })
+    if (!response.ok) return null
+    const payload = await response.json() as Record<string, { success?: boolean; data?: { genres?: { description: string }[]; release_date?: { date?: string }; header_image?: string } }>
+    const data = payload[String(appId)]
+    if (!data?.success || !data.data) return null
+    const year = data.data.release_date?.date?.match(/\b(19|20)\d{2}\b/)?.[0] ?? null
+    return {
+      released: year ? `${year}-01-01` : null,
+      genres: (data.data.genres ?? []).map((genre) => ({ name: genre.description })),
+      header: data.data.header_image ?? null,
+    }
+  } catch { return null }
+}
+
+async function coverExists(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { method: 'HEAD', redirect: 'error', signal: AbortSignal.timeout(6_000) })
+    return response.ok && (response.headers.get('content-type') ?? '').startsWith('image/')
+  } catch { return false }
+}
+
+// Repli sans clé : la recherche publique du magasin Steam et son visuel portrait 600x900.
+async function searchSteam(query: string) {
+  const url = new URL('https://store.steampowered.com/api/storesearch/')
+  url.searchParams.set('term', query)
+  url.searchParams.set('l', 'french')
+  url.searchParams.set('cc', 'FR')
+  const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })
+  if (!response.ok) throw new Error('Recherche Steam indisponible')
+  const payload = await response.json() as { items?: { id: number; name: string; type?: string }[] }
+  const games = (payload.items ?? [])
+    .filter((item) => item.type === 'app' && !/\b(?:demo|soundtrack|artbook|bundle|dlc|pack)\b/i.test(item.name))
+    .slice(0, 6)
+  return await Promise.all(games.map(async (item, index) => {
+    const cover = `https://cdn.akamai.steamstatic.com/steam/apps/${item.id}/library_600x900.jpg`
+    // Les détails sont limités en débit côté Steam : seuls les premiers résultats y passent.
+    const [hasCover, details] = await Promise.all([coverExists(cover), index < 4 ? steamDetails(item.id) : Promise.resolve(null)])
+    return {
+      id: item.id,
+      name: item.name,
+      released: details?.released ?? null,
+      background_image: hasCover ? cover : details?.header ?? null,
+      genres: details?.genres ?? [],
+      slug: String(item.id),
+      source: 'steam',
+      source_url: `https://store.steampowered.com/app/${item.id}/`,
+    }
+  }))
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request) })
   if (request.method !== 'POST' || !originAllowed(request)) return json(request, { error: 'Requête refusée.' }, 403)
@@ -49,24 +106,33 @@ Deno.serve(async (request) => {
   const rawgKey = Deno.env.get('RAWG_API_KEY')
   const igdbClientId = Deno.env.get('IGDB_CLIENT_ID')
   const igdbClientSecret = Deno.env.get('IGDB_CLIENT_SECRET')
-  if (!rawgKey && !(igdbClientId && igdbClientSecret)) return json(request, { error: 'Recherche indisponible.' }, 503)
   let query: string
   try { query = String((await request.json()).query ?? '').trim() }
   catch { return json(request, { error: 'Requête invalide.' }, 400) }
   if (query.length < 2 || query.length > 120) return json(request, { error: 'Recherche invalide.' }, 400)
-  try {
-    if (igdbClientId && igdbClientSecret) {
-      try { return json(request, { results: await searchIgdb(query, igdbClientId, igdbClientSecret) }) }
-      catch { if (!rawgKey) return json(request, { error: 'Recherche indisponible.' }, 502) }
-    }
-    const target = new URL('https://api.rawg.io/api/games')
-    target.searchParams.set('key', rawgKey!)
-    target.searchParams.set('search', query)
-    target.searchParams.set('platforms', '4')
-    target.searchParams.set('page_size', '8')
-    const response = await fetch(target, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })
-    if (!response.ok) return json(request, { error: 'Recherche indisponible.' }, 502)
-    const data = await response.json()
-    return json(request, { results: (data.results ?? []).map((game: Record<string, unknown>) => ({ ...game, source: 'rawg', source_url: `https://rawg.io/games/${game.slug}` })) })
-  } catch { return json(request, { error: 'Recherche indisponible.' }, 502) }
+
+  // Les sources sont essayées de la plus riche à la plus accessible ; Steam ne demande aucune clé.
+  if (igdbClientId && igdbClientSecret) {
+    try {
+      const results = await searchIgdb(query, igdbClientId, igdbClientSecret)
+      if (results.length) return json(request, { results })
+    } catch { /* La source suivante prend le relais. */ }
+  }
+  if (rawgKey) {
+    try {
+      const target = new URL('https://api.rawg.io/api/games')
+      target.searchParams.set('key', rawgKey)
+      target.searchParams.set('search', query)
+      target.searchParams.set('platforms', '4')
+      target.searchParams.set('page_size', '8')
+      const response = await fetch(target, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })
+      if (response.ok) {
+        const data = await response.json()
+        const results = (data.results ?? []).map((game: Record<string, unknown>) => ({ ...game, source: 'rawg', source_url: `https://rawg.io/games/${game.slug}` }))
+        if (results.length) return json(request, { results })
+      }
+    } catch { /* La source suivante prend le relais. */ }
+  }
+  try { return json(request, { results: await searchSteam(query) }) }
+  catch { return json(request, { error: 'Recherche indisponible.' }, 502) }
 })
