@@ -1,0 +1,9 @@
+.env
+.env.*
+.vercel/
+.vercel-cli/
+node_modules/
+dist/
+supabase/
+netlify/
+*.log

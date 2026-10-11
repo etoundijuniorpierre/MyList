@@ -1,0 +1,15 @@
+project_id = "glmseokfaljqcjibrhci"
+
+[auth]
+enable_signup = false
+site_url = "https://mylist-rho.vercel.app"
+additional_redirect_urls = ["http://localhost:5173"]
+
+[functions.admin-login]
+verify_jwt = false
+
+[functions.game-search]
+verify_jwt = true
+
+[functions.cache-poster]
+verify_jwt = true
