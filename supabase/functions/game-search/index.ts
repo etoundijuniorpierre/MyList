@@ -1,8 +1,14 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.95.3'
 import { corsHeaders, json, originAllowed } from '../_shared/http.ts'
 import { projectKey } from '../_shared/keys.ts'
+import { betterFallback, hasMatchingCover } from './match.ts'
 
 let igdbToken: { value: string; expiresAt: number } | null = null
+
+type GameResult = {
+  id: number; name: string; released: string | null; background_image: string | null
+  genres: { name: string }[]; slug: string; source: string; source_url: string
+}
 
 async function searchIgdb(query: string, clientId: string, clientSecret: string) {
   if (!igdbToken || igdbToken.expiresAt < Date.now() + 60_000) {
@@ -10,7 +16,7 @@ async function searchIgdb(query: string, clientId: string, clientSecret: string)
     authUrl.searchParams.set('client_id', clientId)
     authUrl.searchParams.set('client_secret', clientSecret)
     authUrl.searchParams.set('grant_type', 'client_credentials')
-    const auth = await fetch(authUrl, { method: 'POST', signal: AbortSignal.timeout(10_000) })
+    const auth = await fetch(authUrl, { method: 'POST', signal: AbortSignal.timeout(4_000) })
     if (!auth.ok) throw new Error('Authentification IGDB indisponible')
     const token = await auth.json() as { access_token: string; expires_in: number }
     igdbToken = { value: token.access_token, expiresAt: Date.now() + token.expires_in * 1000 }
@@ -20,7 +26,7 @@ async function searchIgdb(query: string, clientId: string, clientSecret: string)
     method: 'POST',
     headers: { 'Client-ID': clientId, Authorization: `Bearer ${igdbToken.value}`, 'Content-Type': 'text/plain' },
     body: `search "${safeQuery}"; fields name,first_release_date,cover.image_id,genres.name,slug,url; where platforms = (6); limit 8;`,
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(4_000),
   })
   if (!response.ok) throw new Error('Recherche IGDB indisponible')
   const games = await response.json() as { id: number; name: string; first_release_date?: number; cover?: { image_id?: string }; genres?: { name: string }[]; slug: string; url?: string }[]
@@ -40,7 +46,7 @@ async function steamDetails(appId: number): Promise<SteamDetails | null> {
     const url = new URL('https://store.steampowered.com/api/appdetails')
     url.searchParams.set('appids', String(appId))
     url.searchParams.set('l', 'french')
-    const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8_000) })
+    const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(4_000) })
     if (!response.ok) return null
     const payload = await response.json() as Record<string, { success?: boolean; data?: { genres?: { description: string }[]; release_date?: { date?: string }; header_image?: string } }>
     const data = payload[String(appId)]
@@ -55,7 +61,7 @@ async function steamDetails(appId: number): Promise<SteamDetails | null> {
 
 async function coverExists(url: string): Promise<boolean> {
   try {
-    const response = await fetch(url, { method: 'HEAD', redirect: 'error', signal: AbortSignal.timeout(6_000) })
+    const response = await fetch(url, { method: 'HEAD', redirect: 'error', signal: AbortSignal.timeout(4_000) })
     return response.ok && (response.headers.get('content-type') ?? '').startsWith('image/')
   } catch { return false }
 }
@@ -66,7 +72,7 @@ async function searchSteam(query: string) {
   url.searchParams.set('term', query)
   url.searchParams.set('l', 'french')
   url.searchParams.set('cc', 'FR')
-  const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })
+  const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5_000) })
   if (!response.ok) throw new Error('Recherche Steam indisponible')
   const payload = await response.json() as { items?: { id: number; name: string; type?: string }[] }
   const games = (payload.items ?? [])
@@ -87,6 +93,23 @@ async function searchSteam(query: string) {
       source: 'steam',
       source_url: `https://store.steampowered.com/app/${item.id}/`,
     }
+  }))
+}
+
+async function searchRawg(query: string, key: string): Promise<GameResult[]> {
+  const target = new URL('https://api.rawg.io/api/games')
+  target.searchParams.set('key', key)
+  target.searchParams.set('search', query)
+  target.searchParams.set('platforms', '4')
+  target.searchParams.set('page_size', '8')
+  const response = await fetch(target, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8_000) })
+  if (!response.ok) throw new Error('Recherche RAWG indisponible')
+  const data = await response.json() as { results?: { id: number; name: string; released?: string | null; genres?: { name: string }[]; slug: string }[] }
+  return (data.results ?? []).filter((game) => typeof game.id === 'number' && typeof game.name === 'string' && typeof game.slug === 'string').map((game) => ({
+    id: game.id, name: game.name, released: game.released ?? null,
+    // RAWG background_image is usually a landscape screenshot, not box art.
+    background_image: null, genres: game.genres ?? [], slug: game.slug,
+    source: 'rawg', source_url: `https://rawg.io/games/${encodeURIComponent(game.slug)}`,
   }))
 }
 
@@ -111,34 +134,20 @@ Deno.serve(async (request) => {
   catch { return json(request, { error: 'Requête invalide.' }, 400) }
   if (query.length < 2 || query.length > 120) return json(request, { error: 'Recherche invalide.' }, 400)
 
-  // Les sources sont essayées de la plus riche à la plus accessible ; Steam ne demande aucune clé.
-  if (igdbClientId && igdbClientSecret) {
-    try {
-      const results = await searchIgdb(query, igdbClientId, igdbClientSecret)
-      if (results.some((game) => game.background_image)) return json(request, { results })
-    } catch { /* La source suivante prend le relais. */ }
-  }
-  // Steam provides a free vertical store capsule. Prefer it before sources whose
-  // default images are promotional screenshots with a landscape crop.
-  try {
-    const results = await searchSteam(query)
-    if (results.some((game) => game.background_image)) return json(request, { results })
-  } catch { /* RAWG can still supply release and genre data below. */ }
-  if (rawgKey) {
-    try {
-      const target = new URL('https://api.rawg.io/api/games')
-      target.searchParams.set('key', rawgKey)
-      target.searchParams.set('search', query)
-      target.searchParams.set('platforms', '4')
-      target.searchParams.set('page_size', '8')
-      const response = await fetch(target, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })
-      if (response.ok) {
-        const data = await response.json()
-        const results = (data.results ?? []).map((game: Record<string, unknown>) => ({ ...game, background_image: null, source: 'rawg', source_url: `https://rawg.io/games/${game.slug}` }))
-        if (results.length) return json(request, { results })
-      }
-    } catch { /* La source suivante prend le relais. */ }
-  }
-  try { return json(request, { results: await searchSteam(query) }) }
-  catch { return json(request, { error: 'Recherche indisponible.' }, 502) }
+  // Search concurrently: the browser cancels this request after twelve seconds.
+  // Steam/IGDB offer portrait art; RAWG supplies metadata only.
+  const [steam, igdb, rawg] = await Promise.allSettled([
+    searchSteam(query),
+    igdbClientId && igdbClientSecret ? searchIgdb(query, igdbClientId, igdbClientSecret) : Promise.resolve([]),
+    rawgKey ? searchRawg(query, rawgKey) : Promise.resolve([]),
+  ])
+  const steamResults: GameResult[] = steam.status === 'fulfilled' ? steam.value : []
+  const igdbResults: GameResult[] = igdb.status === 'fulfilled' ? igdb.value : []
+  const rawgResults: GameResult[] = rawg.status === 'fulfilled' ? rawg.value : []
+  if (hasMatchingCover(steamResults, query)) return json(request, { results: steamResults })
+  if (hasMatchingCover(igdbResults, query)) return json(request, { results: igdbResults })
+  let fallback = betterFallback([], steamResults, query)
+  fallback = betterFallback(fallback, igdbResults, query)
+  fallback = betterFallback(fallback, rawgResults, query)
+  return json(request, { results: fallback })
 })

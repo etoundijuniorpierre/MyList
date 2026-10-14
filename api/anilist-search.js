@@ -3,6 +3,7 @@ const query = `query ($search: String!) {
   Page(page: 1, perPage: 10) {
     media(search: $search, type: ANIME, isAdult: false) {
       id
+      format
       title { english romaji native }
       synonyms
       description(asHtml: false)
@@ -40,6 +41,7 @@ export default async function handler(request, response) {
       aliases: [...new Set([item.title?.english, item.title?.romaji, item.title?.native, ...(item.synonyms ?? [])].filter(Boolean))],
       synopsis: item.description ?? null,
       year: item.startDate?.year ?? null,
+      format: item.format ?? null,
       poster_url: item.coverImage?.extraLarge || item.coverImage?.large || null,
       genres: item.genres ?? [],
     })).filter((item) => item.id && item.title)

@@ -1,4 +1,4 @@
-import type { Category, MediaType, MetadataResult } from './types'
+import type { Category, MediaFormat, MediaType, MetadataResult } from './types'
 import { normalizeTitle, titleKey } from './types'
 import { searchQueries } from './titleAliases'
 import { isExactTitle } from './titleMatch'
@@ -7,8 +7,8 @@ import { supabase } from './supabase'
 import { mergeMetadataResults } from './metadataMerge'
 
 type TvShow = { show: { id: number; name: string; summary: string | null; premiered: string | null; genres: string[]; image: { medium: string; original: string } | null; url: string } }
-type AnimeSearch = { data: { mal_id: number; title: string; title_english?: string | null; title_synonyms?: string[]; synopsis: string | null; year?: number | null; aired?: { from: string | null }; genres: { name: string }[]; images?: { jpg?: { large_image_url?: string; image_url?: string } }; url: string }[] }
-type AniListSearch = { results: { id: string; title: string; aliases: string[]; synopsis: string | null; year: number | null; poster_url: string | null; genres: string[] }[] }
+type AnimeSearch = { data: { mal_id: number; title: string; title_english?: string | null; title_synonyms?: string[]; type?: string | null; synopsis: string | null; year?: number | null; aired?: { from: string | null }; genres: { name: string }[]; images?: { jpg?: { large_image_url?: string; image_url?: string } }; url: string }[] }
+type AniListSearch = { results: { id: string; title: string; aliases: string[]; format: string | null; synopsis: string | null; year: number | null; poster_url: string | null; genres: string[] }[] }
 type GameSearch = { results: { id: number; name: string; released: string | null; background_image: string | null; genres: { name: string }[]; slug: string; source?: 'rawg' | 'igdb'; source_url?: string }[] }
 type TvdbSearch = { results: { id: string; name: string; aliases: string[]; overview: string | null; released: string | null; poster_url: string | null; genres: string[] }[] }
 type WikiPage = { pageid: number; title: string; index?: number; pageimage?: string; thumbnail?: { source: string }; terms?: { description?: string[] } }
@@ -20,6 +20,8 @@ let tvdbUnavailableUntil = 0
 let jikanUnavailableUntil = 0
 let jikanQueue: Promise<void> = Promise.resolve()
 let nextJikanRequestAt = 0
+let aniListQueue: Promise<void> = Promise.resolve()
+let nextAniListRequestAt = 0
 
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(12_000) })
@@ -50,6 +52,29 @@ async function getJikanJson<T>(url: string): Promise<T> {
   } finally {
     release()
   }
+}
+
+async function getAniListJson<T>(url: string): Promise<T> {
+  let release!: () => void
+  const previous = aniListQueue
+  aniListQueue = new Promise<void>((resolve) => { release = resolve })
+  await previous
+  try {
+    const wait = Math.max(0, nextAniListRequestAt - Date.now())
+    if (wait) await new Promise((resolve) => setTimeout(resolve, wait))
+    nextAniListRequestAt = Date.now() + 700
+    return await getJson<T>(url)
+  } finally { release() }
+}
+
+function animeFormat(value: string | null | undefined): MediaFormat {
+  if (!value) return null
+  return /^(?:movie)$/i.test(value) ? 'film' : /^(?:tv|tv_short|ova|ona|special)$/i.test(value) ? 'series' : null
+}
+
+function hasAnimePoster(results: MetadataResult[], format: MediaFormat): boolean {
+  return results.some((result) => result.match === 'exact' && result.poster_url &&
+    (format === 'film' ? result.media_format === 'film' : result.media_format !== 'film'))
 }
 
 function plainText(html: string | null): string | null {
@@ -131,7 +156,8 @@ async function jikan(query: string): Promise<MetadataResult[]> {
   for (const [index, candidate] of queries.entries()) {
     const response = await getJikanJson<AnimeSearch>(`/api/anime-search?q=${encodeURIComponent(candidate)}`)
     const matches: MetadataResult[] = response.data.map((anime) => ({
-      category: 'anime', media_type: 'anime', title: anime.title, title_key: titleKey('anime', 'anime', anime.title),
+      category: 'anime', media_type: 'anime', title: anime.title, title_key: titleKey('anime', 'anime', anime.title, animeFormat(anime.type)),
+      media_format: animeFormat(anime.type),
       synopsis: anime.synopsis?.replace(/\s+\[Written by MAL Rewrite\]$/, '') ?? null,
       poster_url: anime.images?.jpg?.large_image_url ?? anime.images?.jpg?.image_url ?? null,
       genres: anime.genres?.map((genre) => genre.name) ?? [],
@@ -146,9 +172,9 @@ async function jikan(query: string): Promise<MetadataResult[]> {
 }
 
 async function anilist(query: string): Promise<MetadataResult[]> {
-  const response = await getJson<AniListSearch>(`/api/anilist-search?q=${encodeURIComponent(searchQueries(query)[0])}`)
+  const response = await getAniListJson<AniListSearch>(`/api/anilist-search?q=${encodeURIComponent(searchQueries(query)[0])}`)
   return response.results.map((anime) => ({
-    category: 'anime', media_type: 'anime', title: anime.title, title_key: titleKey('anime', 'anime', anime.title),
+    category: 'anime', media_type: 'anime', media_format: animeFormat(anime.format), title: anime.title, title_key: titleKey('anime', 'anime', anime.title, animeFormat(anime.format)),
     synopsis: plainText(anime.synopsis), poster_url: anime.poster_url, genres: anime.genres ?? [], year: anime.year,
     source: 'anilist', source_id: anime.id, source_url: `https://anilist.co/anime/${anime.id}`,
     active: true, seasons_count: null, game_size_gb: null,
@@ -178,7 +204,7 @@ async function tvdb(query: string, category: 'series' | 'novelas' | 'dramas' | '
     const { data, error } = await supabase.functions.invoke<TvdbSearch>('tvdb-search', { body: { query: searchQueries(query)[0] }, signal: AbortSignal.timeout(12_000) })
     if (error || !data) throw error ?? new Error('Recherche indisponible')
     return data.results.map((show) => ({
-      category, media_type: category === 'anime' ? 'anime' : null, title: show.name, title_key: titleKey(category, category === 'anime' ? 'anime' : null, show.name),
+      category, media_type: category === 'anime' ? 'anime' : null, media_format: category === 'anime' ? 'series' : null, title: show.name, title_key: titleKey(category, category === 'anime' ? 'anime' : null, show.name),
       synopsis: show.overview, poster_url: show.poster_url, genres: show.genres ?? [],
       year: show.released ? Number(show.released.slice(0, 4)) : null,
       source: 'tvdb', source_id: show.id, source_url: `https://www.thetvdb.com/dereferrer/series/${show.id}`,
@@ -189,7 +215,7 @@ async function tvdb(query: string, category: 'series' | 'novelas' | 'dramas' | '
   } catch { tvdbUnavailableUntil = Date.now() + 5 * 60_000; return [] }
 }
 
-async function lookup(query: string, category: Category): Promise<MetadataResult[]> {
+async function lookup(query: string, category: Category, format: MediaFormat = null): Promise<MetadataResult[]> {
   if (query.trim().length < 2) return []
   let main: MetadataResult[] = []
   try {
@@ -201,36 +227,39 @@ async function lookup(query: string, category: Category): Promise<MetadataResult
         main = [...main, ...(await tvdb(query, category)).filter((entry) => !seen.has(entry.title_key))]
       }
     } else if (category === 'anime') {
-      // TheTVDB répond souvent aux titres anime même lorsque Jikan est lent ou indisponible.
-      main = await tvdb(query, 'anime')
-      if (!main.some((entry) => entry.match === 'exact' && entry.poster_url && entry.genres.length)) {
-        try {
-          const animeResults = await jikan(query)
-          main = mergeMetadataResults(main, animeResults)
-        } catch {
-          jikanUnavailableUntil = Date.now() + 5 * 60_000
-        }
+      let publicSourceResponded = false
+      // AniList and Jikan identify films explicitly. TheTVDB endpoint searches
+      // series only, so it cannot provide an automatic film cover.
+      try { main = await anilist(query); publicSourceResponded = true } catch { /* Jikan reste disponible. */ }
+      if (!hasAnimePoster(main, format)) {
+        try { main = mergeMetadataResults(main, await jikan(query)); publicSourceResponded = true }
+        catch { jikanUnavailableUntil = Date.now() + 5 * 60_000 }
       }
-      if (!main.some((entry) => entry.match === 'exact' && entry.poster_url && entry.genres.length)) {
-        try { main = mergeMetadataResults(main, await anilist(query)) } catch { /* AniList reste une source de secours. */ }
-      }
+      if (!hasAnimePoster(main, format) && format !== 'film') main = mergeMetadataResults(main, await tvdb(query, 'anime'))
+      if (!publicSourceResponded && !hasAnimePoster(main, format)) throw new Error('Les sources d’affiches anime sont temporairement indisponibles. Reprenez la recherche plus tard.')
     }
     else main = await rawg(query)
-  } catch { /* La source gratuite de repli reste disponible. */ }
-  if (main.some((entry) => entry.match === 'exact' && entry.poster_url && entry.genres.length)) return main
+  } catch (error) {
+    if (category === 'anime') throw error
+    /* La source gratuite de repli reste disponible. */
+  }
+  if (category === 'anime' ? hasAnimePoster(main, format) : main.some((entry) => entry.match === 'exact' && entry.poster_url && entry.genres.length)) return main
+  if (category === 'anime' && format === 'film') return main
   const wiki = await wikipedia(searchQueries(query)[0], category)
   const seen = new Set(main.map((entry) => entry.title_key))
   return [...main, ...wiki.filter((entry) => !seen.has(entry.title_key))]
     .sort((a, b) => Number(b.match === 'exact') - Number(a.match === 'exact'))
 }
 
-export function searchMetadata(query: string, category: Category, _mediaType: MediaType = null): Promise<MetadataResult[]> {
+export function searchMetadata(query: string, category: Category, _mediaType: MediaType = null, format: MediaFormat = null): Promise<MetadataResult[]> {
   // Les fiches déjà en base gardent le nom du dossier d'origine : on le nettoie avant d'interroger les sources.
   const search = cleanTitle(query) || query.trim()
-  const key = `${category}:${normalizeTitle(search)}`
+  const key = `${category}:${format ?? 'series'}:${normalizeTitle(search)}`
   const hit = cachedSearches.get(key)
   if (hit) return hit
-  const pending = lookup(search, category).catch((error) => { cachedSearches.delete(key); throw error })
+  const pending = lookup(search, category, format)
+    .then((results) => { if (!results.some((item) => item.match === 'exact' && item.poster_url)) cachedSearches.delete(key); return results })
+    .catch((error) => { cachedSearches.delete(key); throw error })
   if (cachedSearches.size > 300) cachedSearches.clear()
   cachedSearches.set(key, pending)
   return pending

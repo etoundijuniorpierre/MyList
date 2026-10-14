@@ -4,6 +4,7 @@ import { safeUrl, translateSynopsisToFrench } from './media'
 import { supabase } from './supabase'
 import { readPosterJob, savePosterJob, type PosterJob } from './posterJobState'
 import { isLandscapePoster } from './posterDimensions'
+import { selectAnimePoster } from './animePosterMatch'
 import type { CatalogItem } from './types'
 
 export async function resumePosterJob(initial: PosterJob, authorized: () => boolean, publish: (job: PosterJob) => void) {
@@ -54,8 +55,9 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
             // Ordinary enrichment only searches records without an image; the repair job is
             // limited to game images already measured as landscape.
             if (item.poster_url && job.kind !== 'repair-games') return { updated: 0, stored: 0, missing: 0 }
-            const match = uniqueExactMatch(await searchMetadata(item.title, item.category, item.media_type))
-            if (!match || (job.kind === 'repair-games' ? !match.poster_url : (!match.poster_url && !match.genres.length))) return { updated: 0, stored: 0, missing: 1 }
+            const matches = await searchMetadata(item.title, item.category, item.media_type, item.media_format)
+            const match = item.category === 'anime' ? selectAnimePoster(item, matches) : uniqueExactMatch(matches)
+            if (!match || (job.kind === 'repair-games' || item.category === 'anime' ? !match.poster_url : (!match.poster_url && !match.genres.length))) return { updated: 0, stored: 0, missing: 1 }
             if (!authorized()) throw new Error('Session interrompue')
             // Save the match first. If translation or image caching later fails,
             // the next scan sees this poster/genre data and does not search again.
@@ -80,13 +82,23 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
             if (synopsis.status === 'fulfilled' && synopsis.value) followUp.synopsis = synopsis.value
             if (Object.keys(followUp).length && authorized()) {
               const completed = await supabase!.from('catalog_items').update(followUp).eq('id', item.id).select('id').maybeSingle()
-              if (completed.error) throw completed.error
-              if (!completed.data) throw new Error('Le complément de la fiche n’a pas été conservé.')
+              // The cover was already saved. A failed synopsis/cache follow-up
+              // must not cause this title to be searched again on resume.
+              if (completed.error || !completed.data) delete followUp.poster_url
             }
             return { updated: 1, stored: Number(Boolean(followUp.poster_url) || job.kind === 'repair-games'), missing: 0 }
-          } catch { return { updated: 0, stored: 0, missing: 1 } }
+          } catch (error) { return { updated: 0, stored: 0, missing: 0, retry: error instanceof Error ? error.message : 'La recherche a échoué.' } }
         }))
         if (!authorized()) return // Retry this small batch after login; successful writes are idempotent.
+        const retry = outcomes.find((result) => 'retry' in result && result.retry)
+        if (retry && 'retry' in retry) {
+          // Keep the checkpoint at the start of the batch. Successful writes
+          // are already durable and will be skipped during the next attempt.
+          job = { ...job, updated: job.updated + outcomes.reduce((n, result) => n + result.updated, 0),
+            stored: job.stored + outcomes.reduce((n, result) => n + result.stored, 0) }
+          savePosterJob(job); publish(job)
+          throw new Error(`${retry.retry} Reprenez la recherche une fois le service disponible.`)
+        }
         job = { ...job, completed: job.completed + ids.length,
           updated: job.updated + outcomes.reduce((n, result) => n + result.updated, 0),
           stored: job.stored + outcomes.reduce((n, result) => n + result.stored, 0),
