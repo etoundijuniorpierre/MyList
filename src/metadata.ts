@@ -258,7 +258,12 @@ export function searchMetadata(query: string, category: Category, _mediaType: Me
   const hit = cachedSearches.get(key)
   if (hit) return hit
   const pending = lookup(search, category, format)
-    .then((results) => { if (!results.some((item) => item.match === 'exact' && item.poster_url)) cachedSearches.delete(key); return results })
+    .then((results) => {
+      const usablePoster = category === 'anime' ? hasAnimePoster(results, format)
+        : results.some((item) => item.match === 'exact' && item.poster_url)
+      if (!usablePoster) cachedSearches.delete(key)
+      return results
+    })
     .catch((error) => { cachedSearches.delete(key); throw error })
   if (cachedSearches.size > 300) cachedSearches.clear()
   cachedSearches.set(key, pending)
