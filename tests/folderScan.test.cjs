@@ -125,3 +125,39 @@ test('les étiquettes de release en capitales partent sans manger les vrais mots
   assert.equal(cleanTitle('The Winter King S01 WEB H264-FW'), 'The Winter King')
   assert.equal(cleanTitle('Spider-Man Web of Shadows'), 'Spider-Man Web of Shadows')
 })
+
+test('un dossier ANIMES trie animations et saisons de diffusion comme des conteneurs', () => {
+  const result = scanFolder([
+    file('ANIMES/animations/3 gatsu no Lion (March Comes in like a Lion)/S1/3 gatsu no Lion (Saison 1) – 09.mp4', 1e9),
+    file('ANIMES/animations/3 gatsu no Lion (March Comes in like a Lion)/S2/3 gatsu no Lion (Saison 2) – 09.mp4', 1e9),
+    file('ANIMES/automne 2025/Blue Miburo/Blue Miburo S01E01.mkv', 1e9),
+  ])
+  assert.deepEqual(result.map(({ title, category, seasons_count }) => [title, category, seasons_count]), [
+    ['3 gatsu no Lion (March Comes in like a Lion)', 'anime', 2],
+    ['Blue Miburo', 'anime', 1],
+  ])
+})
+
+test('le numéro d’épisode ne devient pas une saison supplémentaire', () => {
+  const result = scanFolder([
+    file('ANIMES/animations/One Anime/Saison 1/One Anime (Saison 1) - 09.mp4', 1e9),
+    file('ANIMES/animations/Another Anime/Another Anime S01 - 09.mkv', 1e9),
+  ])
+  assert.deepEqual(result.map((item) => item.seasons_count), [1, 1])
+})
+
+test('les dossiers de suivi ne deviennent pas des animés et les archives de pièces jointes sont ignorées', () => {
+  const result = scanFolder([
+    file('ANIMES/animations/à prendre/Chillin in My 30s/S01/episode 01.mkv', 1e9),
+    file('ANIMES/automne 2025/fini/Akujiki Reijou/S01/episode 01.mkv', 1e9),
+    file('ANIMES/animations/USA.Ver][1080P]_attachments.7z', 1e6),
+  ])
+  assert.deepEqual(result.map((item) => item.title).sort(), ['Akujiki Reijou', 'Chillin in My 30s'])
+})
+
+test('les étiquettes techniques et l’année finale ne restent pas dans le titre', () => {
+  assert.equal(cleanTitle('Goblin Slayer (2018)'), 'Goblin Slayer')
+  assert.equal(cleanTitle('Ajin Saison'), 'Ajin')
+  assert.equal(cleanTitle('MIX -Tsundere-Raws (ADN)'), 'MIX')
+  assert.equal(cleanTitle('My Happy Marriage + OAV 1'), 'My Happy Marriage')
+})

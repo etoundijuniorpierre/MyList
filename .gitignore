@@ -10,3 +10,9 @@ supabase/.temp/
 
 .vercel
 .env*
+.poster-candidates.json
+.game-year-research.jsonl
+.wiki-candidates.jsonl
+.venv-translation/
+.translation-packages/
+.tmp/

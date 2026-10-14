@@ -11,6 +11,10 @@ const allowedHosts = new Set([
   'cdn.akamai.steamstatic.com',
   'shared.akamai.steamstatic.com',
   'artworks.thetvdb.com',
+  's1.anilist.co',
+  's2.anilist.co',
+  's3.anilist.co',
+  's4.anilist.co',
 ])
 const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const maxBytes = 5 * 1024 * 1024
@@ -45,12 +49,12 @@ Deno.serve(async (request) => {
     .map((byte) => byte.toString(16).padStart(2, '0')).join('')
   const path = `${hash.slice(0, 2)}/${hash}`
   const bucket = service.storage.from('posters')
-  const { data: exists, error: existsError } = await bucket.exists(path)
-  if (existsError) return json(request, { error: 'Stockage des affiches indisponible.' }, 503)
-  if (exists) return json(request, { url: bucket.getPublicUrl(path).data.publicUrl, cached: true })
+  const downloadUrl = source.hostname === 'static.tvmaze.com'
+    ? new URL(source.href.replace('/uploads/images/original_untouched/', '/uploads/images/medium_portrait/'))
+    : source
 
   try {
-    const response = await fetch(source, {
+    const response = await fetch(downloadUrl, {
       headers: { Accept: 'image/jpeg,image/png,image/webp' },
       redirect: 'error',
       signal: AbortSignal.timeout(10_000),
@@ -76,9 +80,12 @@ Deno.serve(async (request) => {
     const { error } = await bucket.upload(path, new Blob(chunks, { type: contentType }), {
       contentType,
       cacheControl: '31536000',
-      upsert: false,
+      upsert: true,
     })
-    if (error && !/already exists|duplicate/i.test(error.message)) return json(request, { error: 'Enregistrement de l’affiche impossible.' }, 502)
+    if (error) {
+      console.error('poster_upload_failed', error.name, error.message)
+      return json(request, { error: 'Enregistrement de l’affiche impossible.' }, 502)
+    }
     return json(request, { url: bucket.getPublicUrl(path).data.publicUrl, cached: true })
   } catch {
     return json(request, { error: 'Récupération de l’affiche impossible.' }, 502)

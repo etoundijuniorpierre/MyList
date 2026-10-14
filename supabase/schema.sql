@@ -10,8 +10,8 @@ create table if not exists public.app_admins (
 
 create table if not exists public.catalog_items (
   id uuid primary key default gen_random_uuid(),
-  category text not null check (category in ('series', 'games', 'anime', 'novelas')),
-  media_type text check (media_type = 'anime'),
+  category text not null check (category in ('series', 'games', 'anime', 'novelas', 'dramas')),
+  media_type text check (media_type in ('anime', 'chinese-drama', 'korean-drama')),
   title text not null check (length(trim(title)) > 0),
   title_key text not null,
   synopsis text,
@@ -27,8 +27,9 @@ create table if not exists public.catalog_items (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint catalog_media_type_check check (
-    (category = 'anime' and media_type = 'anime') or
-    (category <> 'anime' and media_type is null)
+    (category = 'anime' and media_type = 'anime' and media_type is not null) or
+    (category = 'dramas' and media_type is not null and media_type in ('chinese-drama', 'korean-drama')) or
+    (category not in ('anime', 'dramas') and media_type is null)
   ),
   constraint catalog_measure_check check (
     (category = 'games' and seasons_count is null) or
@@ -43,7 +44,7 @@ create unique index if not exists catalog_source_unique on public.catalog_items 
 create index if not exists catalog_category_active_idx on public.catalog_items (category, active, created_at desc);
 
 create table if not exists public.price_rules (
-  category text primary key check (category in ('series', 'anime', 'novelas')),
+  category text primary key check (category in ('series', 'anime', 'novelas', 'dramas')),
   standard_price numeric(12, 2) check (standard_price is null or standard_price >= 0),
   threshold_seasons integer check (threshold_seasons is null or threshold_seasons >= 2),
   threshold_price numeric(12, 2) check (threshold_price is null or threshold_price >= 0),
@@ -96,7 +97,7 @@ revoke all on function public.admin_login_rate_limit(text) from public, anon, au
 grant select, insert, update on public.admin_login_attempts to service_role;
 grant execute on function public.admin_login_rate_limit(text) to service_role;
 
-insert into public.price_rules (category) values ('series'), ('anime'), ('novelas') on conflict do nothing;
+insert into public.price_rules (category) values ('series'), ('anime'), ('novelas'), ('dramas') on conflict do nothing;
 insert into public.game_count_discount (id) values (true) on conflict do nothing;
 
 create or replace function public.set_updated_at()

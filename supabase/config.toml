@@ -16,3 +16,6 @@ verify_jwt = true
 
 [functions.tvdb-search]
 verify_jwt = true
+
+[functions.translate-description]
+verify_jwt = true

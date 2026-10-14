@@ -1,0 +1,90 @@
+import { cachePosterUrl, isCachedPosterUrl, searchMetadata } from './metadata'
+import { uniqueExactMatch } from './titleMatch'
+import { safeUrl, translateSynopsisToFrench } from './media'
+import { supabase } from './supabase'
+import { readPosterJob, savePosterJob, type PosterJob } from './posterJobState'
+import type { CatalogItem } from './types'
+
+export async function resumePosterJob(initial: PosterJob, authorized: () => boolean, publish: (job: PosterJob) => void) {
+  async function work() {
+    const saved = readPosterJob()
+    if (!supabase || !authorized() || saved?.id !== initial.id || saved.result || saved.error) return
+    let job = saved
+    publish(job)
+    try {
+      // Keep the free metadata APIs within a moderate request burst while
+      // doubling throughput over the original three-title search batches.
+      const size = job.kind === 'cache' ? 8 : 6
+      while (job.completed < job.total && authorized()) {
+        const ids = job.ids.slice(job.completed, job.completed + size)
+        const { data, error } = await supabase.from('catalog_items').select('*').in('id', ids)
+        if (error) throw new Error(error.message)
+        if (!authorized()) return
+        const outcomes = await Promise.all((data as CatalogItem[]).map(async item => {
+          try {
+            if (job.kind === 'cache') {
+              if (isCachedPosterUrl(item.poster_url)) return { updated: 0, stored: 0, missing: 0 }
+              const poster = await cachePosterUrl(item.poster_url)
+              if (!poster || !isCachedPosterUrl(poster)) return { updated: 0, stored: 0, missing: 1 }
+              if (!authorized()) throw new Error('Session interrompue')
+              const result = await supabase!.from('catalog_items').update({ poster_url: poster }).eq('id', item.id).select('id').maybeSingle()
+              if (result.error) throw result.error
+              if (!result.data) return { updated: 0, stored: 0, missing: 1 }
+              return { updated: 1, stored: 1, missing: 0 }
+            }
+            // Reload the current row before resuming: completed writes are never overwritten.
+            // This job only searches records without a poster. Existing covers
+            // are already complete for this task, even when genres are absent.
+            if (item.poster_url) return { updated: 0, stored: 0, missing: 0 }
+            const match = uniqueExactMatch(await searchMetadata(item.title, item.category, item.media_type))
+            if (!match || (!match.poster_url && !match.genres.length)) return { updated: 0, stored: 0, missing: 1 }
+            if (!authorized()) throw new Error('Session interrompue')
+            // Save the match first. If translation or image caching later fails,
+            // the next scan sees this poster/genre data and does not search again.
+            const poster = item.poster_url ?? safeUrl(match.poster_url) ?? null
+            const result = await supabase!.from('catalog_items').update({ poster_url: poster,
+              genres: item.genres.length ? item.genres : match.genres, year: item.year ?? match.year,
+              seasons_count: item.seasons_count ?? match.seasons_count,
+              source: ['scan', 'manual'].includes(item.source) ? match.source : item.source,
+              source_id: item.source_id ?? match.source_id, source_url: item.source_url ?? safeUrl(match.source_url),
+            }).eq('id', item.id).select('id').maybeSingle()
+            if (result.error) throw result.error
+            if (!result.data) throw new Error('La fiche trouvée n’a pas été enregistrée. Vérifiez les droits de modification dans Supabase.')
+            // These independent network steps overlap after the durable match write.
+            const [cachedPoster, synopsis] = await Promise.allSettled([
+              item.poster_url ? Promise.resolve(item.poster_url) : cachePosterUrl(poster),
+              translateSynopsisToFrench(item.synopsis ?? match.synopsis),
+            ])
+            const followUp: Record<string, unknown> = {}
+            if (cachedPoster.status === 'fulfilled' && cachedPoster.value && isCachedPosterUrl(cachedPoster.value) && cachedPoster.value !== poster) followUp.poster_url = cachedPoster.value
+            if (synopsis.status === 'fulfilled' && synopsis.value) followUp.synopsis = synopsis.value
+            if (Object.keys(followUp).length && authorized()) {
+              const completed = await supabase!.from('catalog_items').update(followUp).eq('id', item.id).select('id').maybeSingle()
+              if (completed.error) throw completed.error
+              if (!completed.data) throw new Error('Le complément de la fiche n’a pas été conservé.')
+            }
+            return { updated: 1, stored: Number(Boolean(followUp.poster_url)), missing: 0 }
+          } catch { return { updated: 0, stored: 0, missing: 1 } }
+        }))
+        if (!authorized()) return // Retry this small batch after login; successful writes are idempotent.
+        job = { ...job, completed: job.completed + ids.length,
+          updated: job.updated + outcomes.reduce((n, result) => n + result.updated, 0),
+          stored: job.stored + outcomes.reduce((n, result) => n + result.stored, 0),
+          missing: job.missing + outcomes.reduce((n, result) => n + result.missing, 0),
+        }
+        savePosterJob(job); publish(job)
+      }
+      if (job.completed === job.total) {
+        job = { ...job, result: `${job.updated} fiche(s) enrichie(s), ${job.stored} affiche(s) conservée(s).${job.missing ? ` ${job.missing} fiche(s) restent à compléter.` : ''}` }
+        savePosterJob(job); publish(job)
+      }
+    } catch (error) {
+      job = { ...job, error: error instanceof Error ? error.message : 'Traitement interrompu. Vous pouvez reprendre.' }
+      try { savePosterJob(job) } catch { /* The previous checkpoint remains usable. */ }
+      publish(job)
+    }
+  }
+  // One writer across tabs. Closing/reloading the tab automatically releases its lock.
+  if (navigator.locks) await navigator.locks.request(`mylist-posters:${initial.userId}`, work)
+  else await work()
+}

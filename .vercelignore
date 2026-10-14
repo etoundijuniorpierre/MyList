@@ -7,3 +7,6 @@ dist/
 supabase/
 netlify/
 *.log
+scripts/
+.poster-candidates.json
+.game-year-research.jsonl

@@ -51,7 +51,7 @@ Sans configuration Supabase, le site affiche un **mode démonstration** avec sep
    | `IGDB_CLIENT_ID` + `IGDB_CLIENT_SECRET` | Jeux PC, fiche la plus riche | Repli sur RAWG puis Steam |
    | `RAWG_API_KEY` | Jeux PC | Repli sur Steam |
 
-   Toutes ces clés sont gratuites et sans licence commerciale : TheTVDB via un compte sur thetvdb.com, IGDB via un compte développeur Twitch, RAWG via rawg.io. Sans aucune clé, les séries et novelas passent par TVMaze et les jeux par Steam.
+   Ces accès sont facultatifs et leurs conditions varient : [TheTVDB](https://thetvdb.com/api-information) propose un palier gratuit sous conditions de revenu et d’attribution ; [IGDB](https://api-docs.igdb.com/) demande un partenariat pour un usage commercial ; [RAWG](https://rawg.io/apidocs) distingue ses offres selon l’usage. Les droits d’utilisation des affiches restent à vérifier séparément. Sans clé, les séries et novelas passent par TVMaze et les jeux par Steam.
 5. Renseigner `.env.local` avec l’URL Supabase et la **clé publique/publishable**. Ne jamais mettre une clé secrète ou `service_role` dans une variable `VITE_`.
 
 ```dotenv

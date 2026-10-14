@@ -34,16 +34,46 @@ type Group = {
 const video = /\.(mkv|mp4|avi|mov|m4v|wmv|webm|ts)$/i
 const game = /\.(exe|msi|iso|bin|cue|pak|vpk|zip|rar|7z|rpf|dat|doi|dd|cpk)$/i
 const standaloneGame = /\.(iso|zip|rar|7z)$/i
-const season = /(?:saison|season)[ ._-]*(\d{1,3})|\bS(\d{1,3})E\d{1,3}\b/i
+const seasonFolder = /^(?:(?:saison|season)[ ._-]*\d{1,3}|s\d{1,3})$/i
+const videoContainer = /^(?:[aà] prendre|fini|en cours|pas vus?|films?|animations?|automne|hiver|printemps|[eé]t[eé]|fall|winter|spring|summer)(?:[ _-]+\d{4})?$/i
+const animeAliases: Record<string, string> = {
+  mikata: 'The Banished Court Magician Aims to Become the Strongest',
+  'hojo mahou': 'The Banished Court Magician Aims to Become the Strongest',
+  'agharen san wa hakarenai': 'Aharen San wa Hakarenai',
+}
 const innerFolder = /^(bin|binaries|data|content|engine|assets|movies|video|videos|dlc|redist|_redist|_commonredist|commonredist|directx|vcredist|game|games|setup|md5|crack|cracks|crackfix|bonus|bonuses|extra|extras|patch|patchs|patches|update|updates|ost|soundtrack|docs?|manual|manuals|save|saves|config|tool|tools|support)$/i
 const genericRoot = /^(?:[a-z]|media|m[eé]dias|collection|biblioth[eè]que|downloads?|t[eé]l[eé]chargements?|disque|drive|dossier|folder|files?)$/i
 
 function folderCategory(name: string): Category | null {
   if (/^(?:games?|jeux(?: pc)?|pc games?)$/i.test(name)) return 'games'
-  if (/^(?:anim[eé]s?|anime)$/i.test(name)) return 'anime'
+  if (/^(?:anim[eé]s?|anime|animations?)$/i.test(name)) return 'anime'
+  // Cette application n’a pas de catégorie film distincte. Les dossiers « Films »
+  // et saisons de diffusion rencontrés dans une vidéothèque d’animés contiennent
+  // des animés et servent de simples sous-répertoires.
+  if (/^(?:films?|automne|hiver|printemps|[eé]t[eé]|fall|winter|spring|summer)(?:[ _-]+\d{4})?$/i.test(name)) return 'anime'
   if (/^(?:novelas?|telenovelas?)$/i.test(name)) return 'novelas'
   if (/^(?:s[eé]ries?|series)$/i.test(name)) return 'series'
   return null
+}
+
+function addSeasonNumbers(value: string, target: Set<number>) {
+  const addRange = (first: string, last?: string) => {
+    const start = Number(first)
+    const end = last ? Number(last) : start
+    if (start < 1 || end > 60 || end < start || end - start > 20) return
+    for (let number = start; number <= end; number++) target.add(number)
+  }
+
+  const namedRange = /\b(?:saison|season)[ ._-]*0?(\d{1,2})\s*[-–]\s*(?:saison|season)[ ._-]*0?(\d{1,2})/gi
+  for (const match of value.matchAll(namedRange)) addRange(match[1], match[2])
+  const named = /\b(?:saison|season)[ ._-]*0?(\d{1,2})/gi
+  for (const match of value.matchAll(named)) addRange(match[1])
+
+  // Les packs d’animés utilisent souvent « S01 - 01 » pour épisode 1 et
+  // « S01-S02 » pour deux saisons. Le second nombre compte comme saison
+  // uniquement si son S est présent, afin de ne pas prendre le numéro d’épisode.
+  const prefixed = /\bS[ ._-]*0?(\d{1,2})(?:\s*[-–]\s*S[ ._-]*0?(\d{1,2}))?(?=E\d{1,3}|\b|[ ._-])/gi
+  for (const match of value.matchAll(prefixed)) addRange(match[1], match[2])
 }
 
 // Les dossiers portent souvent « (2) » ou « (1 2) » pour indiquer les saisons présentes.
@@ -62,6 +92,11 @@ export function cleanTitle(value: string, isFile = false): string {
     // Le groupe de release est collé par un tiret ou un point ; sinon « Gears of War Reloaded » perdrait un mot du titre.
     .replace(/(?:[-_.]+\s*(?:CODEX|SKIDROW|RELOADED|Mephisto|STEAMPUNKS|SiMON|KAMUi|ElA|Black_Box|P2P))$/i, ' ')
     .replace(/\b(?:v[._ ]?\d+(?:[._]\d+)+|incl[._ ]*\d+[._ ]*DLC|FRENCH|MULTI\d*|REPACK)\b/gi, ' ')
+    .replace(/\s*[-–]\s*Tsundere[- ]Raws\b.*$/i, ' ')
+    .replace(/\s*\+\s*\d*\s*(?:specials?|oavs?|t[eé]l[eé]films?)\b.*$/i, ' ')
+    .replace(/\b(?:dvd\s*box|dvd\s*rip|dual\s*audio|multi\s*subs)\b.*$/i, ' ')
+    .replace(/\s+-?(?:DL|DDP\d|FUNi|CR|ADN|NC|E-AC-3|MPEG2|REMUX|SceneGuardians|Monkey D[. ]Lulu)\b.*$/i, ' ')
+    .replace(/\b(?:custom|notag|smilodon|vff|vost|opus|av1|flac|engjapstfr|uncensored|integral|dvd|bdrip|attachments|\d{3,4}p|\dch)\b/gi, ' ')
     .replace(/\bby[._ ]+xatab\b/gi, ' ')
     .replace(/\(\d{4}\)$/g, ' ')
     .replace(/\s*\((?:\d{1,2}[\s,]*)+\)\s*$/g, ' ')
@@ -83,6 +118,11 @@ export function cleanTitle(value: string, isFile = false): string {
     .replace(/\s[-–](?=\S)[A-Za-z0-9]{2,12}$/g, ' ')
     .replace(/\s+-\s*$/g, ' ')
     .replace(/^\s*-\s+/g, ' ')
+    .replace(/\s*\(\d{4}\)\s*$/g, ' ')
+    .replace(/\s*\(\s*\)\s*$/g, ' ')
+    .replace(/\s+[-–]\s*(?:\d{1,2}(?:\s*[~-]\s*\d{1,2})?|\d{1,2}v\d+)\s*$/i, ' ')
+    .replace(/\s+[25]\s+[01]\s*$/g, ' ')
+    .replace(/\b(?:saison|season)\s*$/i, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   return expandKnownAlias(title)
@@ -131,10 +171,12 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
     const singleGame = singleGameRoots.has(root)
     const nestedCategory = singleGame ? null : folderCategory(parts[1])
     const categoryHint = singleGame ? 'games' : nestedCategory && (parts.length > 3 || genericRoot.test(root)) ? nestedCategory : folderCategory(root)
-    const offset = !singleGame && nestedCategory && categoryHint === nestedCategory ? 2 : 1
+    let offset = !singleGame && nestedCategory && categoryHint === nestedCategory ? 2 : 1
+    while (categoryHint && categoryHint !== 'games' && offset < parts.length - 2 && videoContainer.test(parts[offset])) offset++
     const relative = parts.slice(offset)
     const first = relative[0]
     if (!first) continue
+    if (categoryHint && categoryHint !== 'games' && /_attachments\.(?:zip|rar|7z)$/i.test(file.name)) continue
     const collection = categoryHint === 'games' && collectionPaths.has(parts.slice(0, offset + 1).join('/'))
     if (collection && relative.length < 3) continue
 
@@ -150,7 +192,7 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
       title = cleanTitle(relative[1])
       key = `folder:${parts.slice(0, offset + 2).join('/')}`
       fromFolder = true
-    } else if (fromFolder && !categoryHint && (season.test(first) || innerFolder.test(first))) {
+    } else if (fromFolder && !categoryHint && (seasonFolder.test(first) || innerFolder.test(first))) {
       title = cleanTitle(root)
       key = `folder:${root}`
     } else if (fromFolder) {
@@ -177,8 +219,7 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
     entry.bytes += file.size
     if (video.test(file.name)) entry.videoCount++
     if (game.test(file.name)) entry.gameCount++
-    const match = path.match(season)
-    if (match) entry.seasons.add(Number(match[1] ?? match[2]))
+    addSeasonNumbers(path, entry.seasons)
     if (fromFolder && (relative.length === (collection ? 3 : 2) || (singleGame && relative.length === 1))) {
       const archive = archiveTitle(file.name)
       if (archive) {
@@ -209,7 +250,8 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
     }
     if (category === 'games' && /^(?:[a-z]\s){3,}[a-z]$/i.test(entry.title)) warnings.push('Nom abrégé : corrigez le titre avant l’import')
     const item: ScannedItem = {
-      id: key, title: entry.title, category, media_type: isAnime ? 'anime' : null,
+      id: key, title: category === 'anime' ? animeAliases[normalizeTitle(entry.title)] ?? entry.title : entry.title,
+      category, media_type: isAnime ? 'anime' : null,
       seasons_count: isVideo ? Math.max(1, seasons) : null,
       game_size_gb: category === 'games' ? Math.max(0.01, Math.round(entry.bytes / 1e9 * 100) / 100) : null,
       file_count: entry.paths.length, path: entry.paths[0], selected: true,

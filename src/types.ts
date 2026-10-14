@@ -1,5 +1,5 @@
-export type Category = 'series' | 'games' | 'anime' | 'novelas'
-export type MediaType = 'anime' | null
+export type Category = 'series' | 'games' | 'anime' | 'novelas' | 'dramas'
+export type MediaType = 'anime' | 'chinese-drama' | 'korean-drama' | null
 
 export interface CatalogItem {
   id: string
@@ -23,7 +23,7 @@ export interface CatalogItem {
 export type ItemInput = Omit<CatalogItem, 'id' | 'created_at'>
 
 export interface PriceRule {
-  category: 'series' | 'anime' | 'novelas'
+  category: 'series' | 'anime' | 'novelas' | 'dramas'
   standard_price: number | null
   threshold_seasons: number | null
   threshold_price: number | null
@@ -57,6 +57,7 @@ export const categories: { key: Category; label: string; singular: string; numbe
   { key: 'games', label: 'Jeux PC', singular: 'Jeu PC', number: '02' },
   { key: 'anime', label: 'Animés', singular: 'Animé', number: '03' },
   { key: 'novelas', label: 'Novelas', singular: 'Novela', number: '04' },
+  { key: 'dramas', label: 'Dramas', singular: 'Drama', number: '05' },
 ]
 
 export function categoryLabel(category: Category) {

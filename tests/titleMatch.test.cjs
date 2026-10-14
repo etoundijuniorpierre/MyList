@@ -9,7 +9,7 @@ require.extensions['.ts'] = (module, filename) => {
   module._compile(compiled.outputText, filename)
 }
 
-const { isExactTitle, titleScore } = require('../src/titleMatch.ts')
+const { isExactTitle, titleScore, uniqueExactMatch } = require('../src/titleMatch.ts')
 
 test('une fiche identique au titre du dossier est retenue', () => {
   for (const [found, query] of [
@@ -51,4 +51,13 @@ test('le score reste borné entre 0 et 1', () => {
 test('un sigle ponctué correspond à sa forme compacte', () => {
   assert.equal(isExactTitle('Virtua Fighter 5 R.E.V.O. World Stage', 'virtua fighter 5 revo world stage'), true)
   assert.equal(isExactTitle('S.T.A.L.K.E.R. 2', 'STALKER 2'), true)
+})
+
+test('deux séries homonymes ne reçoivent pas une affiche automatiquement', () => {
+  const matches = [
+    { title: 'Blacklist', year: 2019, match: 'exact' },
+    { title: 'The Blacklist', year: 2013, match: 'exact' },
+  ]
+  assert.equal(uniqueExactMatch(matches), null)
+  assert.equal(uniqueExactMatch([matches[1]]), matches[1])
 })

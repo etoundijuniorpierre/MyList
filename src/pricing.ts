@@ -17,7 +17,9 @@ export function itemPrice(item: CatalogItem, selection: CatalogItem[], rules: Pr
   if (!rule?.currency || rule.standard_price == null) return null
   const seasons = Number(item.seasons_count)
   if (!Number.isInteger(seasons) || seasons < 1) return null
-  const totalSeasons = selection.filter((entry) => category === 'novelas' ? entry.category === 'novelas' : entry.category === 'series' || entry.category === 'anime').reduce((sum, entry) => sum + (Number(entry.seasons_count) || 0), 0)
+  const totalSeasons = selection.filter((entry) => category === 'series' || category === 'anime'
+    ? entry.category === 'series' || entry.category === 'anime'
+    : entry.category === category).reduce((sum, entry) => sum + (Number(entry.seasons_count) || 0), 0)
   const unit = rule.threshold_seasons != null && totalSeasons >= rule.threshold_seasons && rule.threshold_price != null
     ? Number(rule.threshold_price) : Number(rule.standard_price)
   return { amount: unit * seasons, currency: rule.currency, detail: `${seasons} saison${seasons > 1 ? 's' : ''} × ${unit}` }

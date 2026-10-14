@@ -56,3 +56,11 @@ export function titleScore(title: string, query: string): number {
 export function isExactTitle(title: string, query: string): boolean {
   return titleScore(title, query) >= 0.9
 }
+
+// Plusieurs œuvres peuvent porter le même nom (ex. Blacklist et The Blacklist).
+// Une association automatique n'est sûre que si les fiches exactes désignent la même œuvre.
+export function uniqueExactMatch<T extends { title: string; year: number | null; match?: string }>(results: T[]): T | null {
+  const exact = results.filter((entry) => entry.match === 'exact')
+  const identities = new Set(exact.map((entry) => `${normalizeTitle(entry.title)}:${entry.year ?? '?'}`))
+  return identities.size === 1 ? exact[0] : null
+}
