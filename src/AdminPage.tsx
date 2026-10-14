@@ -5,7 +5,7 @@ import type { User } from '@supabase/supabase-js'
 import { cachePosterUrl, isCachedPosterUrl, searchMetadata } from './metadata'
 import { scanFolder, type ScannedItem } from './folderScan'
 import { uniqueExactMatch } from './titleMatch'
-import { catalogIdentity, isCatalogNoiseTitle, mergeCatalogUpdate, sameCatalogTitle, scannedItemInput, unmatchedAnime } from './catalogImport'
+import { catalogIdentity, isCatalogNoiseTitle, mergeCatalogUpdate, sameCatalogTitle, scannedCatalogMatch, scannedItemInput, unmatchedAnime } from './catalogImport'
 import { itemPrice, validateGameTiers } from './pricing'
 import { isConfigured, supabase } from './supabase'
 import { Cover, formatPrice, safeUrl, translateSynopsisToFrench } from './media'
@@ -227,20 +227,32 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
     setBusy(true); setMessage(''); setScanProgress(''); setSuccessToast('')
     let done = 0; let failed = 0; let firstError = ''
     try {
-    const rows: ScannedItem[] = []
-    const seen = new Set<string>()
+    const rows = new Map<string, { row: ScannedItem; existing?: CatalogItem }>()
     for (const row of scanned) {
       if (!row.selected || isCatalogNoiseTitle(row.title)) continue
-      const key = catalogIdentity(row.category, row.media_type, row.title)
-      if (seen.has(key)) continue
-      seen.add(key)
-      rows.push(row)
+      const match = scannedCatalogMatch(row, items)
+      const title = match.existing?.title ?? match.alias.title
+      const key = catalogIdentity(row.category, row.media_type, title)
+      const normalized = {
+        ...row,
+        title,
+        seasons_count: row.category === 'games' ? null : match.alias.preserveExistingSeasons
+          ? match.existing?.seasons_count ?? row.seasons_count
+          : Math.max(row.seasons_count ?? 0, match.alias.seasonFloor ?? 0) || null,
+      }
+      const previous = rows.get(key)
+      if (!previous) rows.set(key, { row: normalized, existing: match.existing })
+      else rows.set(key, {
+        row: {
+          ...previous.row,
+          seasons_count: Math.max(previous.row.seasons_count ?? 0, normalized.seasons_count ?? 0) || null,
+          game_size_gb: Math.max(previous.row.game_size_gb ?? 0, normalized.game_size_gb ?? 0) || null,
+          file_count: previous.row.file_count + normalized.file_count,
+        },
+        existing: previous.existing ?? match.existing,
+      })
     }
-    const prepared = rows.map((row) => {
-      const key = catalogIdentity(row.category, row.media_type, row.title)
-      const existing = items.find((item) => catalogIdentity(item.category, item.media_type, item.title) === key)
-      return scannedItemInput(row, existing)
-    })
+    const prepared = [...rows.values()].map(({ row, existing }) => scannedItemInput(row, existing))
     setActivity({ label: 'Enregistrement des titres', completed: 0, total: prepared.length })
     for (let start = 0; start < prepared.length; start += 40) {
       const chunk = prepared.slice(start, start + 40)
