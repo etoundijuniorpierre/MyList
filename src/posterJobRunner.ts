@@ -56,7 +56,7 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
             // Ordinary enrichment only searches records without an image; the repair job is
             // limited to game images already measured as landscape.
             if (item.poster_url && job.kind !== 'repair-games') return { id: item.id, updated: 0, stored: 0, missing: 0 }
-            const matches = await searchMetadata(item.title, item.category, item.media_type, item.media_format)
+            const matches = await searchMetadata(item.title, item.category, item.media_type, item.media_format, item.year)
             const match = item.category === 'anime' ? selectAnimePoster(item, matches) : uniqueExactMatch(matches)
             if (!match || (job.kind === 'repair-games' || item.category === 'anime' ? !match.poster_url : (!match.poster_url && !match.genres.length))) return { id: item.id, updated: 0, stored: 0, missing: 1 }
             if (!authorized()) throw new Error('Session interrompue')

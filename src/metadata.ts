@@ -9,6 +9,7 @@ import { mergeMetadataResults } from './metadataMerge'
 type TvShow = { show: { id: number; name: string; summary: string | null; premiered: string | null; genres: string[]; image: { medium: string; original: string } | null; url: string } }
 type AnimeSearch = { data: { mal_id: number; title: string; title_english?: string | null; title_synonyms?: string[]; type?: string | null; synopsis: string | null; year?: number | null; aired?: { from: string | null }; genres: { name: string }[]; images?: { jpg?: { large_image_url?: string; image_url?: string } }; url: string }[] }
 type AniListSearch = { results: { id: string; title: string; aliases: string[]; format: string | null; synopsis: string | null; year: number | null; poster_url: string | null; genres: string[] }[] }
+type KitsuSearch = { results: { id: string; title: string; aliases: string[]; format: string | null; synopsis: string | null; year: number | null; poster_url: string | null }[] }
 type GameSearch = { results: { id: number; name: string; released: string | null; background_image: string | null; genres: { name: string }[]; slug: string; source?: 'rawg' | 'igdb'; source_url?: string }[] }
 type TvdbSearch = { results: { id: string; name: string; aliases: string[]; overview: string | null; released: string | null; poster_url: string | null; genres: string[] }[] }
 type WikiPage = { pageid: number; title: string; index?: number; pageimage?: string; thumbnail?: { source: string }; terms?: { description?: string[] } }
@@ -72,9 +73,22 @@ function animeFormat(value: string | null | undefined): MediaFormat {
   return /^(?:movie)$/i.test(value) ? 'film' : /^(?:tv|tv_short|ova|ona|special)$/i.test(value) ? 'series' : null
 }
 
-function hasAnimePoster(results: MetadataResult[], format: MediaFormat): boolean {
+function hasAnimePoster(results: MetadataResult[], format: MediaFormat, year: number | null = null): boolean {
   return results.some((result) => result.match === 'exact' && result.poster_url &&
-    (format === 'film' ? result.media_format === 'film' : result.media_format !== 'film'))
+    (format === 'film' ? result.media_format === 'film' : result.media_format === 'series') &&
+    (!year || Boolean(result.year && Math.abs(year - result.year) <= 1)))
+}
+
+async function kitsu(query: string): Promise<MetadataResult[]> {
+  const response = await getJson<KitsuSearch>(`/api/kitsu-search?q=${encodeURIComponent(searchQueries(query)[0])}`)
+  return response.results.map((anime) => ({
+    category: 'anime', media_type: 'anime', media_format: animeFormat(anime.format), title: anime.title,
+    title_key: titleKey('anime', 'anime', anime.title, animeFormat(anime.format)),
+    synopsis: plainText(anime.synopsis), poster_url: anime.poster_url, genres: [], year: anime.year,
+    source: 'kitsu', source_id: anime.id, source_url: `https://kitsu.io/anime/${anime.id}`,
+    active: true, seasons_count: null, game_size_gb: null,
+    match: anime.aliases.some((title) => isExactTitle(title, query)) ? 'exact' : 'approximate',
+  }))
 }
 
 function plainText(html: string | null): string | null {
@@ -215,7 +229,7 @@ async function tvdb(query: string, category: 'series' | 'novelas' | 'dramas' | '
   } catch { tvdbUnavailableUntil = Date.now() + 5 * 60_000; return [] }
 }
 
-async function lookup(query: string, category: Category, format: MediaFormat = null): Promise<MetadataResult[]> {
+async function lookup(query: string, category: Category, format: MediaFormat = null, year: number | null = null): Promise<MetadataResult[]> {
   if (query.trim().length < 2) return []
   let main: MetadataResult[] = []
   try {
@@ -228,22 +242,27 @@ async function lookup(query: string, category: Category, format: MediaFormat = n
       }
     } else if (category === 'anime') {
       let publicSourceResponded = false
-      // AniList and Jikan identify films explicitly. TheTVDB endpoint searches
-      // series only, so it cannot provide an automatic film cover.
+      // Compare multiple public catalogs. A result counts as usable only when
+      // its title, year and series/film format pass the same safety checks as
+      // the final association; one wrong exact-title hit must not stop fallback.
       try { main = await anilist(query); publicSourceResponded = true } catch { /* Jikan reste disponible. */ }
-      if (!hasAnimePoster(main, format)) {
+      if (!hasAnimePoster(main, format, year)) {
         try { main = mergeMetadataResults(main, await jikan(query)); publicSourceResponded = true }
         catch { jikanUnavailableUntil = Date.now() + 5 * 60_000 }
       }
-      if (!hasAnimePoster(main, format) && format !== 'film') main = mergeMetadataResults(main, await tvdb(query, 'anime'))
-      if (!publicSourceResponded && !hasAnimePoster(main, format)) throw new Error('Les sources d’affiches anime sont temporairement indisponibles. Reprenez la recherche plus tard.')
+      if (!hasAnimePoster(main, format, year)) {
+        try { main = mergeMetadataResults(main, await kitsu(query)); publicSourceResponded = true }
+        catch { /* Kitsu complète les catalogues publics sans clé. */ }
+      }
+      if (!hasAnimePoster(main, format, year) && format !== 'film') main = mergeMetadataResults(main, await tvdb(query, 'anime'))
+      if (!publicSourceResponded && !hasAnimePoster(main, format, year)) throw new Error('Les sources d’affiches anime sont temporairement indisponibles. Reprenez la recherche plus tard.')
     }
     else main = await rawg(query)
   } catch (error) {
     if (category === 'anime') throw error
     /* La source gratuite de repli reste disponible. */
   }
-  if (category === 'anime' ? hasAnimePoster(main, format) : main.some((entry) => entry.match === 'exact' && entry.poster_url && entry.genres.length)) return main
+  if (category === 'anime' ? hasAnimePoster(main, format, year) : main.some((entry) => entry.match === 'exact' && entry.poster_url && entry.genres.length)) return main
   if (category === 'anime' && format === 'film') return main
   const wiki = await wikipedia(searchQueries(query)[0], category)
   const seen = new Set(main.map((entry) => entry.title_key))
@@ -251,15 +270,15 @@ async function lookup(query: string, category: Category, format: MediaFormat = n
     .sort((a, b) => Number(b.match === 'exact') - Number(a.match === 'exact'))
 }
 
-export function searchMetadata(query: string, category: Category, _mediaType: MediaType = null, format: MediaFormat = null): Promise<MetadataResult[]> {
+export function searchMetadata(query: string, category: Category, _mediaType: MediaType = null, format: MediaFormat = null, year: number | null = null): Promise<MetadataResult[]> {
   // Les fiches déjà en base gardent le nom du dossier d'origine : on le nettoie avant d'interroger les sources.
   const search = cleanTitle(query) || query.trim()
-  const key = `${category}:${format ?? 'series'}:${normalizeTitle(search)}`
+  const key = `${category}:${format ?? 'series'}:${year ?? 'any'}:${normalizeTitle(search)}`
   const hit = cachedSearches.get(key)
   if (hit) return hit
-  const pending = lookup(search, category, format)
+  const pending = lookup(search, category, format, year)
     .then((results) => {
-      const usablePoster = category === 'anime' ? hasAnimePoster(results, format)
+      const usablePoster = category === 'anime' ? hasAnimePoster(results, format, year)
         : results.some((item) => item.match === 'exact' && item.poster_url)
       if (!usablePoster) cachedSearches.delete(key)
       return results
@@ -282,7 +301,7 @@ export async function identifyMetadata(query: string, guessedCategory: Category)
 const posterHosts = [
   'static.tvmaze.com', 'cdn.myanimelist.net', 'media.rawg.io', 'images.igdb.com', 'upload.wikimedia.org',
   'cdn.akamai.steamstatic.com', 'shared.akamai.steamstatic.com', 'artworks.thetvdb.com',
-  's1.anilist.co', 's2.anilist.co', 's3.anilist.co', 's4.anilist.co',
+  's1.anilist.co', 's2.anilist.co', 's3.anilist.co', 's4.anilist.co', 'media.kitsu.app',
 ]
 
 export function isCachedPosterUrl(url: string | null): boolean {

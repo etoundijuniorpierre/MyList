@@ -8,9 +8,9 @@ type AnimeIdentity = Pick<CatalogItem, 'title' | 'year' | 'media_format'>
 export function compatibleAnimePoster(item: AnimeIdentity, result: MetadataResult): boolean {
   if (result.category !== 'anime' || result.match !== 'exact' || !result.poster_url) return false
   try { if (new URL(result.poster_url).protocol !== 'https:') return false } catch { return false }
-  if (item.media_format === 'film' && result.media_format !== 'film') return false
-  if (item.media_format !== 'film' && result.media_format === 'film') return false
-  if (item.year && result.year && Math.abs(item.year - result.year) > 1) return false
+  const expectedFormat = item.media_format === 'film' ? 'film' : 'series'
+  if (result.media_format !== expectedFormat) return false
+  if (item.year && (!result.year || Math.abs(item.year - result.year) > 1)) return false
   return true
 }
 

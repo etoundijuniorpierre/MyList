@@ -33,6 +33,8 @@ test('les années incompatibles et les œuvres homonymes restent sans associatio
   const item = { title: 'Escape', year: 2018, media_format: null }
   assert.equal(selectAnimePoster(item, [match('Escape', 2024, 'series')]), null)
   assert.equal(selectAnimePoster({ ...item, year: null }, [match('Escape', 2018, 'series'), match('Escape', 2024, 'series')]), null)
+  assert.equal(selectAnimePoster({ title: 'Escape', year: 2018, media_format: 'series' }, [match('Escape', null, 'series')]), null)
+  assert.equal(selectAnimePoster({ title: 'Escape', year: 2018, media_format: 'series' }, [match('Escape', 2018, null)]), null)
 })
 
 test('une affiche trouvée par alias est retenue quand elle est la seule correspondance exacte', () => {

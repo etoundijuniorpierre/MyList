@@ -54,6 +54,33 @@ test('une limitation de Jikan reste visible et expose son délai de reprise', as
   } finally { global.fetch = originalFetch }
 })
 
+test('la recherche Kitsu normalise titres, alias, format et affiche côté serveur', async () => {
+  const originalFetch = global.fetch
+  let requestedUrl
+  global.fetch = async url => {
+    requestedUrl = new URL(url)
+    return Response.json({ data: [{ id: '123', attributes: {
+      canonicalTitle: 'Yubisaki to Renren', titles: { en: 'A Sign of Affection', ja_jp: 'ゆびさきと恋々' },
+      abbreviatedTitles: ['Yubiren'], subtype: 'TV', startDate: '2024-01-06', synopsis: 'A story.',
+      posterImage: { large: 'https://media.kitsu.app/anime/poster_images/123/large.jpg' },
+    } }] })
+  }
+  try {
+    const handler = (await import('../api/kitsu-search.js')).default
+    const res = response()
+    await handler({ method: 'GET', url: '/api/kitsu-search?q=A%20Sign%20of%20Affection' }, res)
+    assert.equal(res.statusCode, 200)
+    assert.equal(requestedUrl.origin, 'https://kitsu.io')
+    assert.equal(requestedUrl.pathname, '/api/edge/anime')
+    assert.equal(requestedUrl.searchParams.get('filter[text]'), 'A Sign of Affection')
+    assert.equal(res.body.results[0].title, 'A Sign of Affection')
+    assert.equal(res.body.results[0].format, 'TV')
+    assert.equal(res.body.results[0].year, 2024)
+    assert.equal(res.body.results[0].poster_url, 'https://media.kitsu.app/anime/poster_images/123/large.jpg')
+    assert.match(res.headers['cache-control'], /s-maxage=3600/)
+  } finally { global.fetch = originalFetch }
+})
+
 test('la recherche anime alternative interroge AniList et renvoie les affiches verticales', async () => {
   const originalFetch = global.fetch
   let requestedUrl
