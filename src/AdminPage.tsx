@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, Check, LoaderCircle, LockKeyhole, Plus, Search, ChevronDown, Trash2, X } from 'lucide-react'
 import type { User } from '@supabase/supabase-js'
 import { cachePosterUrl, isCachedPosterUrl, searchMetadata } from './metadata'
@@ -38,6 +38,7 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
   const [whatsappInput, setWhatsappInput] = useState(settings.whatsapp_number ? `+${settings.whatsapp_number}` : '')
   const [filter, setFilter] = useState<Category | 'all'>('all')
   const [catalogPage, setCatalogPage] = useState(1)
+  const [searchParams, setSearchParams] = useSearchParams()
   const filteredCatalog = items.filter((item) => filter === 'all' || item.category === filter)
   const catalogPageCount = Math.max(1, Math.ceil(filteredCatalog.length / CATALOG_PAGE_SIZE))
   const visibleCatalogPage = Math.min(catalogPage, catalogPageCount)
@@ -50,6 +51,22 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
     const timeout = window.setTimeout(() => setSuccessToast(''), 6000)
     return () => window.clearTimeout(timeout)
   }, [successToast])
+  useEffect(() => {
+    const requestedId = searchParams.get('edit')
+    if (!requestedId || catalogLoading || !isAdmin) return
+    const item = items.find((entry) => entry.id === requestedId)
+    if (!item) {
+      setMessage('Cette fiche n’est plus disponible dans le catalogue.')
+    } else {
+      setEditing(item)
+      setCategory(item.category)
+      if (item.media_type === 'chinese-drama' || item.media_type === 'korean-drama') setDramaOrigin(item.media_type)
+      setManual(true)
+      setTab('add')
+      setMessage('')
+    }
+    setSearchParams((current) => { current.delete('edit'); return current }, { replace: true })
+  }, [catalogLoading, isAdmin, items, searchParams, setSearchParams])
   function showSuccess(text: string) { setMessage(''); setSuccessToast(text) }
   function scheduleSavedEnrichment(id: string, synopsis: string | null, posterUrl: string | null) {
     if (!supabase) return

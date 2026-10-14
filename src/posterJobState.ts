@@ -3,6 +3,8 @@ export type PosterJob = {
   version: 1; id: string; userId: string; kind: 'cache' | 'enrich' | 'repair-games'; ids: string[]
   phase?: 'scan' | 'search'
   candidateIds?: string[]
+  retryIds?: string[]
+  retryAttempts?: number
   label: string; completed: number; total: number; updated: number; stored: number; missing: number
   result?: string; error?: string
 }
@@ -13,6 +15,8 @@ export function readPosterJob(): PosterJob | null {
       && ['cache', 'enrich', 'repair-games'].includes(job.kind) && Array.isArray(job.ids) && job.ids.every((id: unknown) => typeof id === 'string')
       && (job.phase === undefined || ['scan', 'search'].includes(job.phase))
       && (job.candidateIds === undefined || (Array.isArray(job.candidateIds) && job.candidateIds.every((id: unknown) => typeof id === 'string')))
+      && (job.retryIds === undefined || (Array.isArray(job.retryIds) && job.retryIds.every((id: unknown) => typeof id === 'string')))
+      && (job.retryAttempts === undefined || (Number.isInteger(job.retryAttempts) && job.retryAttempts >= 0 && job.retryAttempts <= 2))
       && Number.isInteger(job.completed) && job.completed >= 0 && job.completed <= job.ids.length
       && job.total === job.ids.length ? job : null
   } catch { return null }

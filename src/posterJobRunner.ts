@@ -16,8 +16,9 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
     try {
       // Keep the free metadata APIs within a moderate request burst while
       // doubling throughput over the original three-title search batches.
-      const size = job.kind === 'repair-games' && job.phase === 'scan' ? 24 : job.kind === 'cache' ? 8 : 6
-      while (job.completed < job.total && authorized()) {
+      while (authorized()) {
+       while (job.completed < job.total && authorized()) {
+        const size = job.kind === 'repair-games' && job.phase === 'scan' ? 24 : job.kind === 'cache' ? 8 : 6
         const ids = job.ids.slice(job.completed, job.completed + size)
         const { data, error } = await supabase.from('catalog_items').select('*').in('id', ids)
         if (error) throw new Error(error.message)
@@ -39,30 +40,34 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
         const outcomes = await Promise.all((data as CatalogItem[]).map(async item => {
           try {
             if (job.kind === 'cache') {
-              if (isCachedPosterUrl(item.poster_url)) return { updated: 0, stored: 0, missing: 0 }
+              if (isCachedPosterUrl(item.poster_url)) return { id: item.id, updated: 0, stored: 0, missing: 0 }
               const poster = await cachePosterUrl(item.poster_url)
-              if (!poster || !isCachedPosterUrl(poster)) return { updated: 0, stored: 0, missing: 1 }
+              if (!poster || !isCachedPosterUrl(poster)) return { id: item.id, updated: 0, stored: 0, missing: 1 }
               if (!authorized()) throw new Error('Session interrompue')
               const result = await supabase!.from('catalog_items').update({ poster_url: poster }).eq('id', item.id).select('id').maybeSingle()
               if (result.error) throw result.error
-              if (!result.data) return { updated: 0, stored: 0, missing: 1 }
-              return { updated: 1, stored: 1, missing: 0 }
+              if (!result.data) return { id: item.id, updated: 0, stored: 0, missing: 1 }
+              return { id: item.id, updated: 1, stored: 1, missing: 0 }
             }
             if (job.kind === 'repair-games') {
-              if (item.category !== 'games' || !item.poster_url || !(await isLandscapePoster(item.poster_url))) return { updated: 0, stored: 0, missing: 0 }
+              if (item.category !== 'games' || !item.poster_url || !(await isLandscapePoster(item.poster_url))) return { id: item.id, updated: 0, stored: 0, missing: 0 }
             }
             // Reload the current row before resuming: completed writes are never overwritten.
             // Ordinary enrichment only searches records without an image; the repair job is
             // limited to game images already measured as landscape.
-            if (item.poster_url && job.kind !== 'repair-games') return { updated: 0, stored: 0, missing: 0 }
+            if (item.poster_url && job.kind !== 'repair-games') return { id: item.id, updated: 0, stored: 0, missing: 0 }
             const matches = await searchMetadata(item.title, item.category, item.media_type, item.media_format)
             const match = item.category === 'anime' ? selectAnimePoster(item, matches) : uniqueExactMatch(matches)
-            if (!match || (job.kind === 'repair-games' || item.category === 'anime' ? !match.poster_url : (!match.poster_url && !match.genres.length))) return { updated: 0, stored: 0, missing: 1 }
+            if (!match || (job.kind === 'repair-games' || item.category === 'anime' ? !match.poster_url : (!match.poster_url && !match.genres.length))) return { id: item.id, updated: 0, stored: 0, missing: 1 }
             if (!authorized()) throw new Error('Session interrompue')
             // Save the match first. If translation or image caching later fails,
             // the next scan sees this poster/genre data and does not search again.
             const poster = job.kind === 'repair-games' ? safeUrl(match.poster_url) ?? null : item.poster_url ?? safeUrl(match.poster_url) ?? null
-            if (job.kind === 'repair-games' && (!poster || poster === item.poster_url)) return { updated: 0, stored: 0, missing: 1 }
+            if (job.kind === 'repair-games' && (!poster || poster === item.poster_url)) return { id: item.id, updated: 0, stored: 0, missing: 1 }
+            // Only replace a game image with a readable portrait cover. Steam
+            // headers and RAWG screenshots are landscapes and make the cards
+            // look cropped even when the source match is correct.
+            if (job.kind === 'repair-games' && await isLandscapePoster(poster, 0.82)) return { id: item.id, updated: 0, stored: 0, missing: 1 }
             const result = await supabase!.from('catalog_items').update({ poster_url: poster,
               genres: item.genres.length ? item.genres : match.genres, year: item.year ?? match.year,
               seasons_count: item.seasons_count ?? match.seasons_count,
@@ -86,25 +91,34 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
               // must not cause this title to be searched again on resume.
               if (completed.error || !completed.data) delete followUp.poster_url
             }
-            return { updated: 1, stored: Number(Boolean(followUp.poster_url) || job.kind === 'repair-games'), missing: 0 }
-          } catch (error) { return { updated: 0, stored: 0, missing: 0, retry: error instanceof Error ? error.message : 'La recherche a échoué.' } }
+            return { id: item.id, updated: 1, stored: Number(Boolean(followUp.poster_url) || job.kind === 'repair-games'), missing: 0 }
+          } catch (error) { return { id: item.id, updated: 0, stored: 0, missing: 0, retry: error instanceof Error ? error.message : 'La recherche a échoué.' } }
         }))
         if (!authorized()) return // Retry this small batch after login; successful writes are idempotent.
-        const retry = outcomes.find((result) => 'retry' in result && result.retry)
-        if (retry && 'retry' in retry) {
-          // Keep the checkpoint at the start of the batch. Successful writes
-          // are already durable and will be skipped during the next attempt.
-          job = { ...job, updated: job.updated + outcomes.reduce((n, result) => n + result.updated, 0),
-            stored: job.stored + outcomes.reduce((n, result) => n + result.stored, 0) }
-          savePosterJob(job); publish(job)
-          throw new Error(`${retry.retry} Reprenez la recherche une fois le service disponible.`)
-        }
+        const retryIds = outcomes.filter(result => 'retry' in result && result.retry).map(result => result.id)
         job = { ...job, completed: job.completed + ids.length,
           updated: job.updated + outcomes.reduce((n, result) => n + result.updated, 0),
           stored: job.stored + outcomes.reduce((n, result) => n + result.stored, 0),
-          missing: job.missing + outcomes.reduce((n, result) => n + result.missing, 0),
+          missing: job.missing + outcomes.filter(result => !('retry' in result && result.retry)).reduce((n, result) => n + result.missing, 0),
+          retryIds: [...new Set([...(job.retryIds ?? []), ...retryIds])],
         }
         savePosterJob(job); publish(job)
+      }
+      // Retry transient failures in their own small pass so one unavailable
+      // provider cannot discard the rest of a long-running catalog job.
+      if (job.completed >= job.total && authorized() && (job.retryIds?.length ?? 0) > 0) {
+        const attempts = job.retryAttempts ?? 0
+        if (attempts < 2) {
+          job = { ...job, ids: job.retryIds!, retryIds: [], completed: 0, total: job.retryIds!.length,
+            retryAttempts: attempts + 1, label: `Nouvelle tentative · ${job.retryIds!.length} fiche(s)`, error: undefined }
+          savePosterJob(job); publish(job)
+          await new Promise(resolve => setTimeout(resolve, 1800))
+          continue
+        }
+        job = { ...job, missing: job.missing + job.retryIds!.length, retryIds: [] }
+        savePosterJob(job); publish(job)
+      }
+       break
       }
       if (job.completed === job.total) {
         job = { ...job, result: `${job.updated} fiche(s) enrichie(s), ${job.stored} affiche(s) conservée(s).${job.missing ? ` ${job.missing} fiche(s) restent à compléter.` : ''}` }
