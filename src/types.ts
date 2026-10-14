@@ -1,10 +1,12 @@
 export type Category = 'series' | 'games' | 'anime' | 'novelas' | 'dramas'
 export type MediaType = 'anime' | 'chinese-drama' | 'korean-drama' | null
+export type MediaFormat = 'series' | 'film' | null
 
 export interface CatalogItem {
   id: string
   category: Category
   media_type: MediaType
+  media_format?: MediaFormat
   title: string
   title_key: string
   synopsis: string | null
@@ -23,7 +25,7 @@ export interface CatalogItem {
 export type ItemInput = Omit<CatalogItem, 'id' | 'created_at'>
 
 export interface PriceRule {
-  category: 'series' | 'anime' | 'novelas' | 'dramas'
+  category: 'series' | 'anime' | 'anime-film' | 'novelas' | 'dramas'
   standard_price: number | null
   threshold_seasons: number | null
   threshold_price: number | null
@@ -68,6 +70,6 @@ export function normalizeTitle(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 }
 
-export function titleKey(category: Category, type: MediaType, title: string) {
-  return `${category}:${type ?? 'none'}:${normalizeTitle(title)}`
+export function titleKey(category: Category, type: MediaType, title: string, format: MediaFormat = null) {
+  return `${category}:${type ?? 'none'}:${normalizeTitle(title)}${format === 'film' ? ':film' : ''}`
 }

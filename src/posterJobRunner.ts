@@ -3,6 +3,7 @@ import { uniqueExactMatch } from './titleMatch'
 import { safeUrl, translateSynopsisToFrench } from './media'
 import { supabase } from './supabase'
 import { readPosterJob, savePosterJob, type PosterJob } from './posterJobState'
+import { isLandscapePoster } from './posterDimensions'
 import type { CatalogItem } from './types'
 
 export async function resumePosterJob(initial: PosterJob, authorized: () => boolean, publish: (job: PosterJob) => void) {
@@ -14,12 +15,26 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
     try {
       // Keep the free metadata APIs within a moderate request burst while
       // doubling throughput over the original three-title search batches.
-      const size = job.kind === 'cache' ? 8 : 6
+      const size = job.kind === 'repair-games' && job.phase === 'scan' ? 24 : job.kind === 'cache' ? 8 : 6
       while (job.completed < job.total && authorized()) {
         const ids = job.ids.slice(job.completed, job.completed + size)
         const { data, error } = await supabase.from('catalog_items').select('*').in('id', ids)
         if (error) throw new Error(error.message)
         if (!authorized()) return
+        if (job.kind === 'repair-games' && job.phase === 'scan') {
+          const landscape = await Promise.all((data as CatalogItem[]).map(async item =>
+            item.category === 'games' && item.poster_url && await isLandscapePoster(item.poster_url) ? item.id : null))
+          if (!authorized()) return
+          const candidateIds = [...new Set([...(job.candidateIds ?? []), ...landscape.filter((id): id is string => Boolean(id))])]
+          const completed = job.completed + ids.length
+          if (completed >= job.total) {
+            job = { ...job, ids: candidateIds, candidateIds: undefined, phase: 'search', completed: 0, total: candidateIds.length, label: `Recherche des jaquettes à remplacer · ${candidateIds.length} fiche(s)` }
+          } else {
+            job = { ...job, candidateIds, completed }
+          }
+          savePosterJob(job); publish(job)
+          continue
+        }
         const outcomes = await Promise.all((data as CatalogItem[]).map(async item => {
           try {
             if (job.kind === 'cache') {
@@ -32,21 +47,26 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
               if (!result.data) return { updated: 0, stored: 0, missing: 1 }
               return { updated: 1, stored: 1, missing: 0 }
             }
+            if (job.kind === 'repair-games') {
+              if (item.category !== 'games' || !item.poster_url || !(await isLandscapePoster(item.poster_url))) return { updated: 0, stored: 0, missing: 0 }
+            }
             // Reload the current row before resuming: completed writes are never overwritten.
-            // This job only searches records without a poster. Existing covers
-            // are already complete for this task, even when genres are absent.
-            if (item.poster_url) return { updated: 0, stored: 0, missing: 0 }
+            // Ordinary enrichment only searches records without an image; the repair job is
+            // limited to game images already measured as landscape.
+            if (item.poster_url && job.kind !== 'repair-games') return { updated: 0, stored: 0, missing: 0 }
             const match = uniqueExactMatch(await searchMetadata(item.title, item.category, item.media_type))
-            if (!match || (!match.poster_url && !match.genres.length)) return { updated: 0, stored: 0, missing: 1 }
+            if (!match || (job.kind === 'repair-games' ? !match.poster_url : (!match.poster_url && !match.genres.length))) return { updated: 0, stored: 0, missing: 1 }
             if (!authorized()) throw new Error('Session interrompue')
             // Save the match first. If translation or image caching later fails,
             // the next scan sees this poster/genre data and does not search again.
-            const poster = item.poster_url ?? safeUrl(match.poster_url) ?? null
+            const poster = job.kind === 'repair-games' ? safeUrl(match.poster_url) ?? null : item.poster_url ?? safeUrl(match.poster_url) ?? null
+            if (job.kind === 'repair-games' && (!poster || poster === item.poster_url)) return { updated: 0, stored: 0, missing: 1 }
             const result = await supabase!.from('catalog_items').update({ poster_url: poster,
               genres: item.genres.length ? item.genres : match.genres, year: item.year ?? match.year,
               seasons_count: item.seasons_count ?? match.seasons_count,
-              source: ['scan', 'manual'].includes(item.source) ? match.source : item.source,
-              source_id: item.source_id ?? match.source_id, source_url: item.source_url ?? safeUrl(match.source_url),
+              source: job.kind === 'repair-games' || ['scan', 'manual'].includes(item.source) ? match.source : item.source,
+              source_id: job.kind === 'repair-games' ? match.source_id : item.source_id ?? match.source_id,
+              source_url: job.kind === 'repair-games' ? safeUrl(match.source_url) : item.source_url ?? safeUrl(match.source_url),
             }).eq('id', item.id).select('id').maybeSingle()
             if (result.error) throw result.error
             if (!result.data) throw new Error('La fiche trouvée n’a pas été enregistrée. Vérifiez les droits de modification dans Supabase.')
@@ -63,7 +83,7 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
               if (completed.error) throw completed.error
               if (!completed.data) throw new Error('Le complément de la fiche n’a pas été conservé.')
             }
-            return { updated: 1, stored: Number(Boolean(followUp.poster_url)), missing: 0 }
+            return { updated: 1, stored: Number(Boolean(followUp.poster_url) || job.kind === 'repair-games'), missing: 0 }
           } catch { return { updated: 0, stored: 0, missing: 1 } }
         }))
         if (!authorized()) return // Retry this small batch after login; successful writes are idempotent.

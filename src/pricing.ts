@@ -13,12 +13,14 @@ export function itemPrice(item: CatalogItem, selection: CatalogItem[], rules: Pr
     return tier ? { amount: Number(tier.price), currency: tier.currency, detail: `${size.toLocaleString('fr-FR')} Go` } : null
   }
   const category = item.category
-  const rule = rules.find((entry) => entry.category === category)
+  const priceCategory = category === 'anime' && item.media_format === 'film' ? 'anime-film' : category
+  const rule = rules.find((entry) => entry.category === priceCategory)
   if (!rule?.currency || rule.standard_price == null) return null
+  if (priceCategory === 'anime-film') return { amount: Number(rule.standard_price), currency: rule.currency, detail: `1 film × ${Number(rule.standard_price)}` }
   const seasons = Number(item.seasons_count)
   if (!Number.isInteger(seasons) || seasons < 1) return null
   const totalSeasons = selection.filter((entry) => category === 'series' || category === 'anime'
-    ? entry.category === 'series' || entry.category === 'anime'
+    ? entry.category === 'series' || (entry.category === 'anime' && entry.media_format !== 'film')
     : entry.category === category).reduce((sum, entry) => sum + (Number(entry.seasons_count) || 0), 0)
   const unit = rule.threshold_seasons != null && totalSeasons >= rule.threshold_seasons && rule.threshold_price != null
     ? Number(rule.threshold_price) : Number(rule.standard_price)

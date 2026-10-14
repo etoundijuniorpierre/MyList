@@ -26,6 +26,8 @@ type ScanAlias = { title: string; seasonFloor?: number; preserveExistingSeasons?
 const scanAliases = new Map<string, ScanAlias>([
   ['blue lock vs u 20 japan', { title: 'Blue Lock', seasonFloor: 2 }],
   ['blue lock', { title: 'Blue Lock', seasonFloor: 2 }],
+  ['food war', { title: 'Food Wars - Shokugeki no Sôma', seasonFloor: 3 }],
+  ['food wars shokugeki no soma', { title: 'Food Wars - Shokugeki no Sôma', seasonFloor: 5 }],
   ['cinderella chef', { title: 'Cinderella Chef 2', seasonFloor: 2 }],
   ['cinderella chef 2', { title: 'Cinderella Chef 2', seasonFloor: 2 }],
   ['akuyaku reijou nanode last boss wo kattemimashita', { title: 'Akuyaku Reijou nanode Last' }],
@@ -66,6 +68,20 @@ const scanAliases = new Map<string, ScanAlias>([
   ['uchuu kyoudai', { title: 'Uchuu Kyoudai - Space Brother' }],
 ])
 
+const filmTitleAliases = new Map<string, string>([
+  ['amer beton', 'Amer Béton'],
+  ['presage flower', 'Fate/stay night Heaven’s Feel I Presage Flower'],
+  ['lost butterfly', 'Fate/stay night Heaven’s Feel II Lost Butterfly'],
+  ['spring song', 'Fate/stay night Heaven’s Feel III Spring Song'],
+  ['bungo stray dogs', 'Bungo Stray Dogs Dead Apple'],
+  ['mahou shoujo madoka magica part i hajimari no monogatari 01', 'Puella Magi Madoka Magica the Movie Part I Beginnings'],
+  ['mahou shoujo madoka magica part ii eien no monogatari 01', 'Puella Magi Madoka Magica the Movie Part II Eternal'],
+  ['mahou shoujo madoka magica part iii hangyaku no monogatari 01', 'Puella Magi Madoka Magica the Movie Part III Rebellion'],
+  ['shokugeki no souma jump festa special', 'Food Wars Jump Festa Special'],
+  ['that time i got reincarnated as a slime scarlet bond', 'That Time I Got Reincarnated as a Slime Scarlet Bond'],
+  ['tensei shitara slime datta ken guren no kizuna hen', 'That Time I Got Reincarnated as a Slime Scarlet Bond'],
+])
+
 function scanAssociationTitle(title: string) {
   const cleaned = title
     .replace(/\[[^\]]*\]/g, ' ')
@@ -84,13 +100,14 @@ function scanAssociationTitle(title: string) {
 }
 
 export function scannedCatalogMatch(row: ScannedItem, items: CatalogItem[]) {
-  const alias = row.category === 'anime' ? scanAssociationTitle(row.title) : { title: row.title.trim() }
-  const identity = (category: CatalogItem['category'], mediaType: CatalogItem['media_type'], title: string) => {
+  const filmAlias = row.category === 'anime' && row.media_format === 'film' ? filmTitleAliases.get(normalizeTitle(row.title)) : undefined
+  const alias = filmAlias ? { title: filmAlias } : row.category === 'anime' ? scanAssociationTitle(row.title) : { title: row.title.trim() }
+  const identity = (category: CatalogItem['category'], mediaType: CatalogItem['media_type'], title: string, mediaFormat?: CatalogItem['media_format']) => {
     const associatedTitle = category === 'anime' ? scanAssociationTitle(title).title : title
-    return catalogIdentity(category, mediaType, associatedTitle)
+    return catalogIdentity(category, mediaType, associatedTitle, mediaFormat)
   }
-  const key = identity(row.category, row.media_type, alias.title)
-  const existing = items.find((item) => identity(item.category, item.media_type, item.title) === key)
+  const key = identity(row.category, row.media_type, alias.title, row.media_format)
+  const existing = items.find((item) => identity(item.category, item.media_type, item.title, item.media_format) === key)
   return { alias, existing, key }
 }
 
@@ -98,12 +115,12 @@ export function isCatalogNoiseTitle(title: string) {
   return /^\[\s*\d+\s+fichiers?\s*\]$/i.test(title.trim()) || importTitle(title).length === 0
 }
 
-export function catalogIdentity(category: CatalogItem['category'], mediaType: CatalogItem['media_type'], title: string) {
-  return `${category}:${category === 'anime' ? 'anime' : category === 'dramas' ? mediaType ?? 'unknown' : 'none'}:${importTitle(title)}`
+export function catalogIdentity(category: CatalogItem['category'], mediaType: CatalogItem['media_type'], title: string, mediaFormat?: CatalogItem['media_format']) {
+  return `${category}:${category === 'anime' ? 'anime' : category === 'dramas' ? mediaType ?? 'unknown' : 'none'}:${mediaFormat ?? 'series'}:${importTitle(title)}`
 }
 
-export function sameCatalogTitle(left: Pick<CatalogItem, 'category' | 'media_type' | 'title'>, right: Pick<CatalogItem, 'category' | 'media_type' | 'title'>) {
-  return catalogIdentity(left.category, left.media_type, left.title) === catalogIdentity(right.category, right.media_type, right.title)
+export function sameCatalogTitle(left: Pick<CatalogItem, 'category' | 'media_type' | 'title' | 'media_format'>, right: Pick<CatalogItem, 'category' | 'media_type' | 'title' | 'media_format'>) {
+  return catalogIdentity(left.category, left.media_type, left.title, left.media_format) === catalogIdentity(right.category, right.media_type, right.title, right.media_format)
 }
 
 export function mergeCatalogUpdate(input: ItemInput, existing?: CatalogItem): ItemInput {
@@ -129,8 +146,9 @@ export function scannedItemInput(row: ScannedItem, existing?: CatalogItem): Item
   return {
     category: row.category,
     media_type: mediaType,
+    media_format: row.category === 'anime' && row.media_format === 'film' ? 'film' : null,
     title,
-    title_key: existing?.title_key ?? titleKey(row.category, mediaType, title),
+    title_key: existing?.title_key ?? titleKey(row.category, mediaType, title, row.category === 'anime' ? row.media_format ?? null : null),
     synopsis: existing?.synopsis ?? null,
     poster_url: existing?.poster_url ?? null,
     genres: existing?.genres ?? [],

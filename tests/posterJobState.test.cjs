@@ -22,6 +22,12 @@ test('la progression de recherche d’affiches se restaure après rechargement',
   assert.deepEqual(readPosterJob(), saved)
 })
 
+test('le tri initial des jaquettes et ses candidates restent enregistrés après rechargement', () => {
+  const saved = { version: 1, id: 'repair', userId: 'admin', kind: 'repair-games', phase: 'scan', ids: ['a', 'b', 'c'], candidateIds: ['a'], label: 'Tri des jaquettes', completed: 2, total: 3, updated: 0, stored: 0, missing: 0 }
+  savePosterJob(saved)
+  assert.deepEqual(readPosterJob(), saved)
+})
+
 test('une progression endommagée ou un compteur hors limites n’est jamais repris', () => {
   storage.set(POSTER_JOB_KEY, '{')
   assert.equal(readPosterJob(), null)

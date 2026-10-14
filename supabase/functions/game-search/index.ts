@@ -33,7 +33,7 @@ async function searchIgdb(query: string, clientId: string, clientSecret: string)
   }))
 }
 
-type SteamDetails = { released: string | null; genres: { name: string }[]; header: string | null }
+type SteamDetails = { released: string | null; genres: { name: string }[] }
 
 async function steamDetails(appId: number): Promise<SteamDetails | null> {
   try {
@@ -49,7 +49,6 @@ async function steamDetails(appId: number): Promise<SteamDetails | null> {
     return {
       released: year ? `${year}-01-01` : null,
       genres: (data.data.genres ?? []).map((genre) => ({ name: genre.description })),
-      header: data.data.header_image ?? null,
     }
   } catch { return null }
 }
@@ -81,7 +80,8 @@ async function searchSteam(query: string) {
       id: item.id,
       name: item.name,
       released: details?.released ?? null,
-      background_image: hasCover ? cover : details?.header ?? null,
+      // Never substitute Steam's wide header: cards need a commercial portrait cover.
+      background_image: hasCover ? cover : null,
       genres: details?.genres ?? [],
       slug: String(item.id),
       source: 'steam',
@@ -115,9 +115,15 @@ Deno.serve(async (request) => {
   if (igdbClientId && igdbClientSecret) {
     try {
       const results = await searchIgdb(query, igdbClientId, igdbClientSecret)
-      if (results.length) return json(request, { results })
+      if (results.some((game) => game.background_image)) return json(request, { results })
     } catch { /* La source suivante prend le relais. */ }
   }
+  // Steam provides a free vertical store capsule. Prefer it before sources whose
+  // default images are promotional screenshots with a landscape crop.
+  try {
+    const results = await searchSteam(query)
+    if (results.some((game) => game.background_image)) return json(request, { results })
+  } catch { /* RAWG can still supply release and genre data below. */ }
   if (rawgKey) {
     try {
       const target = new URL('https://api.rawg.io/api/games')
@@ -128,7 +134,7 @@ Deno.serve(async (request) => {
       const response = await fetch(target, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10_000) })
       if (response.ok) {
         const data = await response.json()
-        const results = (data.results ?? []).map((game: Record<string, unknown>) => ({ ...game, source: 'rawg', source_url: `https://rawg.io/games/${game.slug}` }))
+        const results = (data.results ?? []).map((game: Record<string, unknown>) => ({ ...game, background_image: null, source: 'rawg', source_url: `https://rawg.io/games/${game.slug}` }))
         if (results.length) return json(request, { results })
       }
     } catch { /* La source suivante prend le relais. */ }

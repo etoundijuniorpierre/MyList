@@ -34,6 +34,34 @@ test('le scan de la racine du disque reconnaît aussi les collections imbriquée
   ])
 })
 
+test('un dossier racine qui contient ANIME dans son nom reste reconnu comme bibliothèque', () => {
+  const result = scanFolder([
+    file('EJEP ANIME/PAS VUS/Blue Lock Saison 1/Blue Lock S01E01.mkv', 1e9),
+    file('EJEP ANIME/PAS VUS/Collection/Ne Zha (2019)/Ne Zha (2019).mkv', 1e9),
+  ])
+  assert.deepEqual(result.map(({ title, category, media_format }) => [title, category, media_format]), [
+    ['Blue Lock', 'anime', 'series'], ['Ne Zha', 'anime', 'film'],
+  ])
+})
+
+test('les films autonomes connus sont séparés et un film live-action du dossier est écarté', () => {
+  const result = scanFolder([
+    file('EJEP ANIME/PAS VUS/[Anime Land] The First Slam Dunk (BDRip 1080p HEVC HDR10 EAC3 Atmos).mkv', 1e9),
+    file('EJEP ANIME/PAS VUS/Sakra.2023.MULTi.VFi.1080p.HDLight.AC3.5.1.H264-LiHDL.mkv', 1e9),
+  ])
+  assert.deepEqual(result.map(({ title, media_format }) => [title, media_format]), [
+    ['The First Slam Dunk', 'film'],
+  ])
+})
+
+test('les intitulés de sites et le mot épisode accentué sont retirés du vrai titre', () => {
+  const result = scanFolder([
+    file('EJEP ANIME/PAS VUS/release/Release the Spyce - épisode 07 - (VOSTFR) - YouTube.MKV', 1e9),
+    file('EJEP ANIME/PAS VUS/release/Release The Spyce Episode 1 VOSTFR - YouTube.MKV', 1e9),
+  ])
+  assert.deepEqual(result.map(({ title, seasons_count }) => [title, seasons_count]), [['Release the Spyce', 1]])
+})
+
 test('les sous-dossiers techniques restent un seul jeu', () => {
   const result = scanFolder([
     file('Jeux PC/Cyberpunk 2077/bin/game.exe', 2e9),
@@ -146,6 +174,78 @@ test('le numéro d’épisode ne devient pas une saison supplémentaire', () => 
   assert.deepEqual(result.map((item) => item.seasons_count), [1, 1])
 })
 
+test('les saisons ordinales ne confondent pas un épisode avec le numéro de saison', () => {
+  const result = scanFolder([
+    file('Hiver/Kamierabi 2nd Season/[Erai-raws] Kamierabi 2nd Season - 01.mkv', 1e9),
+    file('Hiver/Shy 2nd Season/Shy 2nd Season - 12.mkv', 1e9),
+    file('ANIMES/Titre/Saison 1/Titre S01E13.mkv', 1e9),
+  ])
+  assert.deepEqual(result.map(({ title, seasons_count }) => [title, seasons_count]), [
+    ['Kamierabi', 2], ['Shy', 2], ['Titre', 1],
+  ])
+})
+
+test('les films d’animation sont séparés des saisons de la série', () => {
+  const result = scanFolder([
+    file('ANIMES/Bocchi the Rock!/Saison 1/episode 01.mkv', 1e9),
+    file('ANIMES/Bocchi the Rock!/Films/Bocchi the Rock! Re (2024).mkv', 2e9),
+    file('A VOIR/Blue Thermal Film VOSTFR Streaming Univers Anime.mp4', 2e9),
+  ])
+  assert.deepEqual(result.map(({ title, media_format, seasons_count }) => [title, media_format, seasons_count]), [
+    ['Bocchi the Rock!', 'series', 1],
+    ['Bocchi the Rock! Re', 'film', null],
+    ['Blue Thermal', 'film', null],
+  ])
+})
+
+test('une année et un numéro d’épisode sans SxxExx ne transforment pas une série en film', () => {
+  const result = scanFolder([
+    file('ANIME MANGA EJEP/animé/Baki The Grappler/baki 3 vf/Baki (2018) (VF) - baki 2018 - 01 VF - Voiranime.mp4', 1e9),
+    file('ANIME MANGA EJEP/animé/Food Wars/Food War S3/Shokugeki No Soma 050 VOSTFR 2018.mkv', 1e9),
+    file('Hiver/Ne Zha (2019)/Ne Zha (2019) (.mkv', 1e9),
+  ])
+  assert.deepEqual(result.map(({ title, media_format }) => [title, media_format]), [
+    ['Baki The Grappler', 'series'], ['Food Wars', 'series'], ['Ne Zha', 'film'],
+  ])
+})
+
+test('les saisons intégrées au nom du dossier et les pages de streaming ne créent pas de faux films', () => {
+  const result = scanFolder([
+    file('ANIME/animé/Food Wars/Food War S3/Shokugeki No Soma 050 VOSTFR 2018.mkv', 1e9),
+    file('ANIME/animé/DOTA Dragons Blood/Dota Saison 2/DOTA - Dragon Blood - Saison 2 » Série streaming et Film streaming en vf.mp4', 1e9),
+    file('ANIME/animé/Blue Lock The Movie Episode Nagi/Blue Lock The Movie Episode Nagi (2024).mkv', 1e9),
+  ])
+  assert.deepEqual(result.map(({ title, media_format, seasons_count }) => [title, media_format, seasons_count]), [
+    ['Food Wars', 'series', 3], ['DOTA Dragons Blood', 'series', 2], ['Blue Lock - Episode Nagi', 'film', null],
+  ])
+})
+
+test('les dossiers de collecte « new animé » sont traversés et les livres audio ignorés', () => {
+  const result = scanFolder([
+    file('new animé/Laid-Back Camp/Saison 1/episode 01.mkv', 1e9),
+    file('new animé/Ne Zha (2019)/Ne Zha (2019).mkv', 1e9),
+    file('Hiver/Anglais facile- Progresser en anglais en 14 étapes. Livre audio gratuit.mp4', 1e9),
+  ])
+  assert.deepEqual(result.map(({ title, category }) => [title, category]), [
+    ['Laid-Back Camp', 'anime'], ['Ne Zha', 'anime'],
+  ])
+})
+
+test('les conteneurs A VOIR et OK restent dans Animés et les films sans étiquette sont reconnus', () => {
+  const result = scanFolder([
+    file('A VOIR/Amer beton - Gum Gum Streaming.mp4', 1e9),
+    file('A VOIR/oddtaxi-in-the-woods.mp4', 1e9),
+    file('A VOIR/totsukuni-no-shoujo-lenfant-et-le-maudit.mp4', 1e9),
+    file('OK/Peter Grill to Kenja no Jikan S01/S01E01.mkv', 1e9),
+  ])
+  assert.deepEqual(result.map(({ title, category, media_format, seasons_count }) => [title, category, media_format, seasons_count]), [
+    ['Amer beton', 'anime', 'film', null],
+    ['Odd Taxi: In the Woods', 'anime', 'film', null],
+    ['The Girl from the Other Side', 'anime', 'film', null],
+    ['Peter Grill to Kenja no Jikan', 'anime', 'series', 1],
+  ])
+})
+
 test('les dossiers de suivi ne deviennent pas des animés et les archives de pièces jointes sont ignorées', () => {
   const result = scanFolder([
     file('ANIMES/animations/à prendre/Chillin in My 30s/S01/episode 01.mkv', 1e9),
@@ -160,4 +260,24 @@ test('les étiquettes techniques et l’année finale ne restent pas dans le tit
   assert.equal(cleanTitle('Ajin Saison'), 'Ajin')
   assert.equal(cleanTitle('MIX -Tsundere-Raws (ADN)'), 'MIX')
   assert.equal(cleanTitle('My Happy Marriage + OAV 1'), 'My Happy Marriage')
+})
+
+test('un code épisode E01 dans le nom du dossier ne pollue pas le titre et ne crée pas un film', () => {
+  const result = scanFolder([
+    file('ANIMES/Monsters.Ippyaku.Sanjou.Hiryuu.Jigoku.E01.MULTi.1080p.WEB.x264/Monsters.Ippyaku.Sanjou.Hiryuu.Jigoku.E01.MULTi.1080p.WEB.x264.mkv', 1e9),
+  ])
+  assert.deepEqual(result.map(({ title, media_format, seasons_count }) => [title, media_format, seasons_count]), [
+    ['Monsters Ippyaku Sanjou Hiryuu Jigoku', 'series', 1],
+  ])
+})
+
+test('des épisodes numérotés avec date de release ne deviennent pas des films distincts', () => {
+  const result = scanFolder([
+    file('ANIMES/Hunter x Hunter 2011/BOX 1/[DragonMax] Hunter X Hunter 2011 - 07 (2018_05_05 02_05_45 UTC).mkv', 1e9),
+    file('ANIMES/Hunter x Hunter 2011/BOX 1/[DragonMax] Hunter X Hunter 2011 - 08 (2018_05_05 02_05_45 UTC).mkv', 1e9),
+    file('ANIMES/Hunter x Hunter 2011/BOX 1/[DragonMax] Hunter X Hunter 2011 - 09 (2018_05_05 02_05_45 UTC).mkv', 1e9),
+  ])
+  assert.deepEqual(result.map(({ title, media_format, seasons_count, file_count }) => [title, media_format, seasons_count, file_count]), [
+    ['Hunter x Hunter 2011', 'series', 1, 3],
+  ])
 })
