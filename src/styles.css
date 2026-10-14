@@ -236,3 +236,27 @@ html{scroll-behavior:auto}
 @media(max-width:760px){.catalog-guide ol{grid-template-columns:1fr;gap:12px}.catalog-guide li{display:flex;gap:13px;align-items:flex-start}.catalog-guide li p{margin:0}.filters .select-field{flex:1;min-width:145px}.year-toggle{flex:1}.media-card{height:400px;min-height:400px}.card-info{left:12px;right:12px;bottom:12px}.card-info h3{font-size:18px}.detail-content{grid-template-columns:1fr}.detail-content>.cover{height:230px;min-height:230px}.detail-copy{padding:28px}}
 @media(max-width:480px){.card-grid{grid-template-columns:1fr}.media-card{height:clamp(390px,125vw,480px);min-height:390px}.card-facts span{font-size:10px;padding:3px 6px}.card-summary{-webkit-line-clamp:2}.card-actions button{font-size:11px}}
 .hero-dramas{background:radial-gradient(circle at 77% 48%,#36504b 0,#222c2b 28%,#14191a 65%)}.hero-dramas .hero-symbol{background:linear-gradient(145deg,#aed8c4,#588c78)}.drama-tabs{display:flex;gap:9px;margin:-8px 0 20px}.drama-tabs button{border:1px solid #e3dfda;border-radius:999px;background:#fff;color:#55515a;padding:9px 17px;font-size:12px;font-weight:700;transition:background .2s,color .2s,border-color .2s}.drama-tabs button:hover,.drama-tabs button.active{background:#171820;color:#fff;border-color:#171820}@media(max-width:620px){.drama-tabs{overflow-x:auto;padding-bottom:4px}.drama-tabs button{white-space:nowrap}}
+
+.admin-list-summary{margin:16px 0 8px;color:#726b70;font-size:12px;font-weight:700}.admin-pagination{display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;margin-top:24px}.admin-pagination span{color:#665f65;font-size:12px;font-weight:700;min-width:108px;text-align:center}@media(max-width:480px){.admin-pagination{gap:8px}.admin-pagination .button-secondary{padding:9px 11px}}
+
+/* Le filtrage est le premier outil visible après la bannière sur chaque catalogue. */
+.hero-copy>.hero-filter-hint{margin:9px 0 0;color:#e9d3c9;font-size:11px;letter-spacing:.02em}
+.catalog-section{padding-top:clamp(26px,3.5vw,44px)}
+.catalog-section>.section-heading{margin-bottom:20px}
+.catalog-toolbar{scroll-margin-top:0;margin:0 0 24px;padding:19px 20px 20px;border:1px solid #e6dbd1;border-radius:12px;background:#fff;box-shadow:0 10px 28px #211c2210}
+.catalog-toolbar-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.catalog-toolbar-head h3{font-family:'Space Grotesk',sans-serif;font-size:18px;letter-spacing:-.03em;margin:0;color:#26212a}
+.catalog-toolbar-head p{font-size:11px;color:#766d72;margin:0}
+.catalog-toolbar .filters{display:grid;grid-template-columns:minmax(145px,1fr) minmax(155px,1fr) minmax(220px,2fr) minmax(155px,1fr) auto;align-items:end;gap:11px;margin:0}
+.catalog-toolbar .filter-control{display:flex;flex-direction:column;gap:7px;min-width:0;font-size:11px;font-weight:800;color:#584c51}
+.catalog-toolbar .filter-control>.select-field,.catalog-toolbar .filter-control>.search-field{width:100%;max-width:none;min-width:0;height:45px}
+.catalog-toolbar .filter-control>.select-field select{font-weight:600}
+.catalog-toolbar .year-toggle{height:45px}
+.catalog-section .catalog-guide{margin:0 0 28px;padding:22px 24px;border:1px solid #ebe4dd;border-radius:10px;gap:20px;background:#faf7f3}
+.catalog-section .catalog-guide h2{font-size:24px}
+.catalog-section .catalog-guide ol{gap:16px}
+.catalog-section .catalog-guide li p{font-size:11px}
+.catalog-section .drama-tabs{margin:0 0 20px}
+@media(max-width:1100px){.catalog-toolbar .filters{grid-template-columns:repeat(2,minmax(0,1fr))}.catalog-toolbar .filter-search{grid-column:1/-1}.catalog-toolbar .year-toggle{width:100%}}
+@media(max-width:620px){.catalog-toolbar{padding:16px;margin-bottom:18px}.catalog-toolbar-head{gap:5px;margin-bottom:13px}.catalog-toolbar-head h3{font-size:17px}.catalog-toolbar-head p{font-size:10px}.catalog-toolbar .filters{gap:10px}.catalog-toolbar .filter-search,.catalog-toolbar .filter-genre,.catalog-toolbar .year-toggle{grid-column:1/-1}.catalog-section .catalog-guide{padding:20px;margin-bottom:22px}.catalog-section .catalog-guide ol{margin-top:15px}}
+@media(max-width:380px){.catalog-toolbar .filters{grid-template-columns:1fr}.catalog-toolbar .filter-search,.catalog-toolbar .filter-genre,.catalog-toolbar .year-toggle{grid-column:auto}}
