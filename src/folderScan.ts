@@ -16,6 +16,11 @@ export interface ScannedItem {
   warning: string | null
   auto_category?: boolean
   parentId?: string
+  /** Titre lu dans les noms de fichiers quand il diffère du dossier (ex. titre anglais). */
+  alt_title?: string | null
+  /** Numéros de saison repérés, pour expliquer le total proposé. */
+  season_numbers?: number[]
+  season_detail?: string | null
 }
 
 type ScanFile = Pick<File, 'name' | 'size' | 'webkitRelativePath'>
@@ -31,14 +36,21 @@ type Group = {
   mediaFormat: 'series' | 'film' | null
   fromFolder: boolean
   suffixSeasons: number | null
+  // Sous-dossiers directs d'un dossier-titre : numéro de saison, null pour une suite sans numéro, 'skip' pour films/OAV/coffrets.
+  subfolders: Map<string, SubfolderKind>
+  rootVideos: number
+  fileTitles: Map<string, { title: string; count: number }>
+  subfolderPaths: Map<string, string[]>
 }
+
+type SubfolderKind = number | null | 'skip' | 'variant'
 
 const video = /\.(mkv|mp4|avi|mov|m4v|wmv|webm|ts)$/i
 const game = /\.(exe|msi|iso|bin|cue|pak|vpk|zip|rar|7z|rpf|dat|doi|dd|cpk)$/i
 const standaloneGame = /\.(iso|zip|rar|7z)$/i
 const seasonFolder = /^(?:(?:saison|season)[ ._-]*\d{1,3}|s\d{1,3})$/i
 const seasonMarker = /\b(?:saison|season)[ ._-]*\d{1,3}\b|\bS[ ._-]*\d{1,3}(?=$|[ ._-])/i
-const videoContainer = /^(?:(?:.+\s+)?(?:all|complete)\s+(?:series|serie|seasons|saisons)|[aà] prendre|fini|en cours|pas vus?|films?|animations?|new anim[eé]s?|new anime|anim[eé]s? (?:nouveaux|r[eé]cents?)|automne|hiver|printemps|[eé]t[eé]|fall|winter|spring|summer|release)(?:[ _-]+\d{4})?$/i
+const videoContainer = /^(?:(?:.+\s+)?(?:all|complete)\s+(?:series|serie|seasons|saisons)|[aà] prendre|finis?|termin[eé]s?|vus|d[eé]j[aà] vus?|en cours|pas vus?|films?|animations?|new anim[eé]s?|new anime|anim[eé]s? (?:nouveaux|r[eé]cents?)|automne|hiver|printemps|[eé]t[eé]|fall|winter|spring|summer|release)(?:[ _-]+\d{4})?$/i
 const filmMarker = /\b(?:film|movie|theatrical|cin[eé]ma|long[- ]m[eé]trage|feature film)\b/i
 const filmFolder = /^(?:films?|movies?|long[- ]m[eé]trages?|cin[eé]ma)$/i
 const knownStandaloneAnime = new Set([
@@ -91,6 +103,8 @@ function addSeasonNumbers(value: string, target: Set<number>) {
     if (/\b\d{1,2}(?:st|nd|rd|th|er|e|ème|eme)\s+$/i.test(prefix)) continue
     addRange(match[1])
   }
+  const words: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7, première: 1, deuxième: 2, troisième: 3, quatrième: 4, cinquième: 5 }
+  for (const match of value.matchAll(/\b(first|second|third|fourth|fifth|sixth|seventh|première|deuxième|troisième|quatrième|cinquième)[ ._]+(?:saison|season)\b/gi)) addRange(String(words[match[1].toLowerCase()]))
   const ordinal = /\b0?(\d{1,2})(?:st|nd|rd|th|er|e|ème|eme)\s+(?:saison|season)\b/gi
   for (const match of value.matchAll(ordinal)) addRange(match[1])
 
@@ -112,6 +126,11 @@ export function seasonsFromSuffix(name: string): number | null {
 export function cleanTitle(value: string, isFile = false): string {
   let title = isFile ? value.replace(/\.(?:iso|zip|rar|7z|exe|msi|mkv|mp4|avi|mov|m4v|wmv|webm|ts)$/i, '') : value
   title = title.replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\{[^}]*\}/g, ' ')
+    .replace(/^\s*\(\d{1,3}\)\s*/, ' ')
+    // « L'intégrale de Raconte-moi une histoire » : la mention précède le vrai titre.
+    .replace(/\b(?:l['’-]\s*)?int[eé]grale\s+(?:de|des|du|d['’])\s*/gi, ' ')
+    .replace(/\([^)]*\b(?:bonus|dvd|[eé]pisodes?|specials?|sp[eé]ciaux|fichiers?)\b[^)]*\)/gi, ' ')
     .replace(/\s*\((?=[^)]*\b(?:HDR10?|Atmos|BDRip|BluRay|1080p|720p|HEVC|x265|WEB[- ]?DL|AAC|AC3|EAC3)\b)[^)]*\)/gi, ' ')
     .replace(/\((?:www\.[^)]*|[^)]*\.(?:com|net|org))\)/gi, ' ')
     .replace(/^(?:rune|tenoke|dodi|fitgirl|corepack|empress|codex|skidrow|reloaded|plaza|hoodlum|razor1911|elamigos|xatab|kaos|flt|tinyiso|gog|masquerade|online[-_. ]?fix)[-_. ]+/i, ' ')
@@ -132,7 +151,7 @@ export function cleanTitle(value: string, isFile = false): string {
     .replace(/\b(?:S\d{1,2}[ ._-]*E\d{1,4}|(?:episode|épisode|ep|e)[ ._-]*0?\d{1,4})\b.*$/i, ' ')
     .replace(/\b(?:dvd\s*box|dvd\s*rip|dual\s*audio|multi\s*subs)\b.*$/i, ' ')
     .replace(/\s+-?(?:DL|DDP\d|FUNi|CR|ADN|NC|E-AC-3|MPEG2|REMUX|SceneGuardians|Monkey D[. ]Lulu)\b.*$/i, ' ')
-    .replace(/\b(?:custom|notag|smilodon|vff|vost|opus|av1|flac|engjapstfr|uncensored|integral|dvd|bdrip|attachments|\d{3,4}p|\dch)\b/gi, ' ')
+    .replace(/\b(?:custom|notag|smilodon|vff|vf|vost|opus|jpn|zho|kor|av1|flac|engjapstfr|uncensored|integral|dvd|bdrip|attachments|\d{3,4}p|\dch)\b/gi, ' ')
     .replace(/\bby[._ ]+xatab\b/gi, ' ')
     .replace(/\(\d{4}\)$/g, ' ')
     .replace(/\s*\((?:\d{1,2}[\s,]*)+\)\s*$/g, ' ')
@@ -146,7 +165,7 @@ export function cleanTitle(value: string, isFile = false): string {
     .replace(/\b(?:WEB|EAC3|DDP?|AMZN|NF|DSNP|ATVP|HMAX|MAX|REMUX|PROPER|REPACK|FW)\b/g, ' ')
     // Retiré d'un bloc, sinon « Complete Edition » laisse « Edition » orphelin dans le titre.
     .replace(/\b(?:complete|definitive|ultimate|deluxe|gold|goty|game of the year|remastered?)\s+edition\b/gi, ' ')
-    .replace(/\b(?:int[eé]grales?|integrales?|completes?|complets?|vostfr|truefrench|subfrench|dvdrip|brrip|bdrip|hdtv|hdlight|web[-_. ]?dl|ac3|aac|dts|h\.?26[45]|10bits?)\b/gi, ' ')
+    .replace(/\b(?:int[eé]grale?s?|integrale?s?|completes?|complets?|vostfr|truefrench|subfrench|dvdrip|brrip|bdrip|hdtv|hdlight|web[-_. ]?dl|ac3|aac|dts|h\.?26[45]|10bits?)\b/gi, ' ')
     .replace(/\b(?:1080p|720p|2160p|x264|x265|hevc|bluray|webrip)\b/gi, ' ')
     .replace(/[._]+/g, ' ')
     .replace(/^GTA\b/i, 'Grand Theft Auto')
@@ -159,8 +178,27 @@ export function cleanTitle(value: string, isFile = false): string {
     .replace(/\s*\(\s*\)\s*$/g, ' ')
     .replace(/\s+[-–]\s*(?:\d{1,2}(?:\s*[~-]\s*\d{1,2})?|\d{1,2}v\d+)\s*$/i, ' ')
     .replace(/\s+[25]\s+[01]\s*$/g, ' ')
-    .replace(/\s*\+\s*$/g, ' ')
+    .replace(/\s+\+\s*$/g, ' ')
     .replace(/\b(?:saison|season)\s*$/i, ' ')
+    // Résidus d'un nom de release tronqué : crochet jamais refermé, « -DL », signature après tiret cadratin.
+    .replace(/\s*[[{(][^\]})]*$/g, ' ')
+    .replace(/(?:^|\s)-?DL\b/g, ' ')
+    .replace(/\s+l['’-]\s*(?:int[eé]grale)?\s*$/i, ' ')
+    .replace(/\b(?:BD|MUX|VO|LD|SD|XVID|XviD|MP3|BluRa|FANSUB|Fansub|HDrip|HDRip|DDL|VOSTF|10B)\b/g, ' ')
+    .replace(/\s+—\s*\S+\s*$/g, ' ')
+    .replace(/\b(?:en\s+hd\s+)?streaming\s+gratuitement\b.*$/i, ' ')
+    .replace(/\s*[-–]*\s*\b(?:anime[- ]ultime|mavanime|voiranime(?:\s*tv)?|neko[- ]sama|toonanime|japmanga|zone[- ]telechargement(?:\s*com)?|vid[eé]o\s+dailymotion|dailymotion|wawacity|french[- ]anime|vostfree|anime[- ]sama)\b.*$/i, ' ')
+    .replace(/\s(?:xvid|divx|x26[45]|h\.?26[45]|aac|ac3)[-.][A-Za-z0-9]+$/i, ' ')
+    .replace(/\b(?:Tsundere[- ]Raws|Erai[- ]raws|ToonsHub|T3KASHi|SubsPlease|HorribleSubs|MSubs|Multi[- ]Subs)\b/gi, ' ')
+    // « Zombie-Loan 01 - 11 » : plage d'épisodes en fin de nom.
+    .replace(/\s\d{1,3}\s*[-–]\s*\d{1,3}\b.*$/g, ' ')
+    .replace(/\s*\((?:19|20)\d{2}\)\s*/g, ' ')
+    .replace(/\s[-–]\s+(?=[-–]\s)/g, ' ')
+    .replace(/\s[-–]\s+\S$/g, ' ')
+    .replace(/\s[-–]?S$/g, ' ')
+    .replace(/[\s\-–—:&,(]+$/g, ' ')
+    .replace(/\s+\+\s*$/g, ' ')
+    .replace(/^[\s\-–—:+&,)]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   return expandKnownAlias(title)
@@ -254,6 +292,46 @@ function filmTitle(path: string, name: string) {
   return folder ? cleanTitle(folder) : title
 }
 
+const ignoredSubfolder = /\b(?:films?|movies?|gekijouban|oav|ova|ona|specials?|sp[eé]ciaux|bonus|extras?|subs?|sous[- ]titres?|ost|soundtrack)\b|\b(?:box|dvd|disc|disque|cd|vol(?:ume)?)\s*\d/i
+
+/** Classe un sous-dossier de dossier-titre : saison numérotée, suite nommée (null), variante de langue ou contenu annexe. */
+export function classifySubfolder(parentTitle: string, name: string): SubfolderKind {
+  const spaced = name.replace(/[._]+/g, ' ')
+  if (innerFolder.test(name) || filmFolder.test(name) || ignoredSubfolder.test(spaced)) return 'skip'
+  const numbers = new Set<number>()
+  addSeasonNumbers(spaced, numbers)
+  const leading = name.match(/^\s*0?(\d{1,2})\s*(?:[.)-]\s|$)/)
+  if (leading) numbers.add(Number(leading[1]))
+  if (numbers.size) return Math.max(...numbers)
+  if (/\b(?:E|EP|episode|épisode)\s*\d{1,4}\b|[-–]\s*\d{1,4}\s*$/i.test(spaced)) return 'skip'
+  const parent = normalizeTitle(cleanTitle(parentTitle))
+  const own = normalizeTitle(cleanTitle(spaced))
+  if (!own || own === parent || /^(?:vf|vostfr|vost|vo|multi|french|fr)$/.test(own)) return 'variant'
+  // « PSYCHO-PASS 3 » sous « Psycho Pass » : le nombre restant est la saison.
+  const rest = own.startsWith(parent) ? own.slice(parent.length).trim() : ''
+  if (/^\d{1,2}$/.test(rest) && Number(rest) >= 2) return Number(rest)
+  return null
+}
+
+const franchiseWord = /\b(?:saga|collection|franchise|univers|universe|trilog(?:y|ie)|anthologie|anthology)\b/i
+
+/** Sous-dossiers qui sont des œuvres à part entière : dossier de franchise ou au moins trois suites sans numéro. */
+export function franchiseSubfolders(parentTitle: string, subfolders: Map<string, SubfolderKind>) {
+  const unnamed = [...subfolders].filter(([, value]) => value === null).map(([name]) => name)
+  return franchiseWord.test(parentTitle) ? [...subfolders].filter(([, value]) => value !== 'skip').map(([name]) => name) : unnamed.length >= 3 ? unnamed : []
+}
+
+/** Total de saisons d'un dossier-titre : le plus grand numéro, ou le nombre de saisons distinctes si des suites ne sont pas numérotées. */
+export function folderSeasonTotal(numbers: Set<number>, subfolders: Map<string, SubfolderKind>, rootVideos: number) {
+  const numbered = new Set([...numbers].filter((value) => value >= 1 && value <= 60))
+  for (const value of subfolders.values()) if (typeof value === 'number') numbered.add(value)
+  const unnamed = [...subfolders].filter(([, value]) => value === null).map(([name]) => name)
+  const variant = [...subfolders.values()].some((value) => value === 'variant')
+  const implicit = !numbered.size && unnamed.length > 0 && (rootVideos > 0 || variant) ? 1 : 0
+  const total = Math.max(0, ...numbered, numbered.size + unnamed.length + implicit)
+  return { total, numbered: [...numbered].sort((a, b) => a - b), unnamed }
+}
+
 export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
   const sourceFiles = Array.from(files).filter((file) => !/\b(?:livre audio|audiobook|podcast|cours d['’]anglais)\b/i.test(`${file.name} ${file.webkitRelativePath || ''}`))
   const episodeFolderPaths = episodeFolders(sourceFiles)
@@ -300,6 +378,8 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
     let key: string
     let rawName = root
     let fromFolder = singleGame || relative.length > 1
+    // Sous-dossier direct du dossier-titre (null = fichier posé à la racine du titre).
+    let titleSubfolder: string | null | undefined
     const animatedVideo = video.test(file.name) && (categoryHint === 'anime' || /\b(?:anime|anim[eé]s?)\b/i.test(path))
     const film = animatedVideo && isAnimatedFilm(path, episodeFolderPaths)
     if (film) {
@@ -318,10 +398,12 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
     } else if (fromFolder && !categoryHint && (seasonFolder.test(first) || innerFolder.test(first))) {
       title = cleanTitle(root)
       key = `folder:${root}`
+      titleSubfolder = relative.length > 1 ? first : null
     } else if (fromFolder) {
       rawName = first
       title = cleanTitle(first)
       key = `folder:${parts.slice(0, offset + 1).join('/')}`
+      titleSubfolder = relative.length > 2 ? relative[1] : null
     } else if (video.test(file.name)) {
       title = titleFromVideo(file.name) || cleanTitle(root)
       key = `video:${title}`
@@ -338,12 +420,26 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
       title, paths: [], bytes: 0, videoCount: 0, gameCount: 0,
       seasons: new Set<number>(), archives: new Map<string, { title: string; bytes: number; path: string; count: number }>(), categoryHint, mediaFormat, fromFolder,
       suffixSeasons: seasonsFromSuffix(rawName),
+      subfolders: new Map<string, SubfolderKind>(), rootVideos: 0, fileTitles: new Map<string, { title: string; count: number }>(), subfolderPaths: new Map<string, string[]>(),
     }
     entry.paths.push(path)
     entry.bytes += file.size
     if (video.test(file.name)) entry.videoCount++
     if (game.test(file.name)) entry.gameCount++
     if (entry.mediaFormat !== 'film') addSeasonNumbers(path, entry.seasons)
+    if (video.test(file.name) && entry.mediaFormat !== 'film' && titleSubfolder !== undefined) {
+      if (titleSubfolder === null) entry.rootVideos++
+      else {
+        if (!entry.subfolders.has(titleSubfolder)) entry.subfolders.set(titleSubfolder, classifySubfolder(rawName, titleSubfolder))
+        entry.subfolderPaths.set(titleSubfolder, [...(entry.subfolderPaths.get(titleSubfolder) ?? []), path])
+      }
+      const fileTitle = titleFromVideo(file.name)
+      const fileKey = normalizeTitle(fileTitle)
+      if (fileKey.length >= 3) {
+        const previous = entry.fileTitles.get(fileKey)
+        entry.fileTitles.set(fileKey, { title: previous?.title ?? fileTitle, count: (previous?.count ?? 0) + 1 })
+      }
+    }
     if (fromFolder && (relative.length === (collection ? 3 : 2) || (singleGame && relative.length === 1))) {
       const archive = archiveTitle(file.name)
       if (archive) {
@@ -358,6 +454,27 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
     groups.set(key, entry)
   }
 
+  const looseGroups = new Map<string, string[]>()
+  for (const [key, entry] of groups) {
+    if (!key.startsWith('video:')) continue
+    const stripped = entry.title.replace(/\s+[-–]?\s*\d{1,4}\s*$/, '').trim()
+    if (stripped.length >= 3 && stripped !== entry.title) looseGroups.set(normalizeTitle(stripped), [...(looseGroups.get(normalizeTitle(stripped)) ?? []), key])
+  }
+  for (const [looseKey, keys] of looseGroups) {
+    const exact = [...groups].find(([key, entry]) => key.startsWith('video:') && !keys.includes(key) && normalizeTitle(entry.title) === looseKey)?.[0]
+    const all = exact ? [exact, ...keys] : keys
+    const target = all.length >= 2 ? groups.get(all[0]) : undefined
+    if (!target) continue
+    if (!exact) target.title = target.title.replace(/\s+[-–]?\s*\d{1,4}\s*$/, '').trim() || target.title
+    for (const key of all) {
+      const entry = groups.get(key)
+      if (!entry || entry === target) continue
+      target.paths.push(...entry.paths); target.bytes += entry.bytes; target.videoCount += entry.videoCount
+      for (const value of entry.seasons) target.seasons.add(value)
+      groups.delete(key)
+    }
+  }
+
   const unique = new Map<string, ScannedItem>()
   const suggestions: ScannedItem[] = []
   for (const [key, entry] of groups) {
@@ -368,7 +485,38 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
     const isNovela = isVideo && !isAnime && (entry.categoryHint === 'novelas' || /(?:novelas?|telenovelas?)/i.test(entry.paths[0]))
     const category: Category = isVideo ? (isAnime ? 'anime' : isNovela ? 'novelas' : 'series') : 'games'
     const warnings: string[] = []
-    const seasons = Math.max(0, ...entry.seasons) || entry.suffixSeasons || 0
+    // « toaru SAGA », « Ghost In Shell » : un dossier qui regroupe plusieurs œuvres devient une fiche par œuvre.
+    const franchiseParts = isVideo && entry.mediaFormat !== 'film' ? franchiseSubfolders(entry.title, entry.subfolders) : []
+    for (const name of franchiseParts) {
+      const paths = entry.subfolderPaths.get(name) ?? []
+      const numbers = new Set<number>()
+      addSeasonNumbers(name.replace(/[._]+/g, ' '), numbers)
+      for (const subPath of paths) { const code = subPath.match(/\bS(\d{1,2})[ ._-]*E\d{1,4}/i); if (code && Number(code[1]) >= 1) numbers.add(Number(code[1])) }
+      const subTitle = cleanTitle(name.replace(/[._]+/g, ' '))
+      if (!subTitle) continue
+      suggestions.push({
+        id: `${key}:work:${name}`, parentId: key, title: subTitle, category: isAnime ? 'anime' : isNovela ? 'novelas' : 'series',
+        media_type: isAnime ? 'anime' : null, media_format: isAnime ? 'series' : null,
+        seasons_count: Math.max(1, ...numbers), game_size_gb: null, file_count: paths.length, path: paths[0] ?? entry.paths[0], selected: true,
+        warning: `Œuvre séparée du dossier « ${entry.title} »${numbers.size ? '' : ' · Saison non indiquée : 1 proposée'}`,
+        season_numbers: [...numbers].sort((a, b) => a - b), season_detail: numbers.size ? `S${[...numbers].sort((a, b) => a - b).join(', S')}` : null,
+      })
+      entry.subfolders.delete(name)
+    }
+    if (franchiseParts.length && !entry.rootVideos && ![...entry.subfolders.values()].some((value) => value !== 'skip')) continue
+    if (franchiseParts.length) {
+      entry.seasons.clear()
+      for (const [name, paths] of entry.subfolderPaths) if (entry.subfolders.has(name)) for (const subPath of paths) addSeasonNumbers(subPath, entry.seasons)
+    }
+    const folderSeasons = folderSeasonTotal(entry.seasons, entry.subfolders, entry.rootVideos)
+    const seasons = folderSeasons.total || entry.suffixSeasons || 0
+    const seasonDetail = !isVideo || entry.mediaFormat === 'film' || !seasons ? null : [
+      folderSeasons.numbered.length ? `S${folderSeasons.numbered.join(', S')}` : '',
+      folderSeasons.unnamed.length ? `${folderSeasons.unnamed.length} suite${folderSeasons.unnamed.length > 1 ? 's' : ''} sans numéro (${folderSeasons.unnamed.slice(0, 2).map((name) => cleanTitle(name)).join(', ')})` : '',
+      entry.suffixSeasons && !folderSeasons.total ? `(${entry.suffixSeasons}) dans le nom` : '',
+    ].filter(Boolean).join(' + ') || null
+    const topFileTitle = [...entry.fileTitles.values()].sort((a, b) => b.count - a.count)[0]
+    const altTitle = topFileTitle && topFileTitle.count >= 2 && normalizeTitle(cleanTitle(topFileTitle.title)) !== normalizeTitle(entry.title) ? cleanTitle(topFileTitle.title) || null : null
     if (isVideo && entry.mediaFormat !== 'film' && !seasons) warnings.push('Saison non indiquée : 1 proposée')
     if (category === 'games' && entry.fromFolder && (entry.archives.size > 1 || /\b(?:trilogie|quadrilogie|collection)\b|\d+\s*[-&]\s*\d+|\s&\s/i.test(entry.title))) {
       warnings.push('Ce dossier peut contenir plusieurs jeux : vérifiez la fiche et la taille')
@@ -383,6 +531,9 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
       file_count: entry.paths.length, path: entry.paths[0], selected: true,
       auto_category: !entry.categoryHint,
       warning: warnings.length ? warnings.join(' · ') : null,
+      alt_title: isVideo ? altTitle : null,
+      season_numbers: isVideo ? folderSeasons.numbered : [],
+      season_detail: seasonDetail,
     }
     const dedupeKey = `${category}:${category === 'anime' ? item.media_format : ''}:${normalizeTitle(item.title)}`
     const previous = unique.get(dedupeKey)
@@ -390,7 +541,17 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
       const preferred = (item.game_size_gb ?? 0) > (previous.game_size_gb ?? 0) ? item : previous
       preferred.warning = [preferred.warning, 'Titre trouvé dans plusieurs dossiers : taille du plus grand conservée'].filter(Boolean).join(' · ')
       unique.set(dedupeKey, preferred)
-    } else if (!previous) {
+    } else if (previous) {
+      // Même titre dans deux dossiers (ex. « S1 » et « S4 » rangés séparément) : on additionne au lieu d'en perdre un.
+      const numbers = [...new Set([...(previous.season_numbers ?? []), ...(item.season_numbers ?? [])])].sort((a, b) => a - b)
+      if (previous.seasons_count !== null) previous.seasons_count = Math.max(previous.seasons_count, item.seasons_count ?? 0, ...numbers)
+      previous.season_numbers = numbers
+      previous.file_count += item.file_count
+      previous.alt_title ??= item.alt_title
+      previous.season_detail = [...new Set([previous.season_detail, item.season_detail].filter(Boolean))].join(' · ') || null
+      const merged = numbers.length || !item.warning?.includes('Saison non indiquée') ? previous.warning?.replace(/Saison non indiquée : 1 proposée(?: · )?/, '') : previous.warning
+      previous.warning = [merged || null, 'Trouvé dans plusieurs dossiers : saisons fusionnées'].filter(Boolean).join(' · ')
+    } else {
       unique.set(dedupeKey, item)
     }
     if (category === 'games' && entry.fromFolder && entry.archives.size > 1) {
@@ -407,8 +568,12 @@ export function scanFolder(files: Iterable<ScanFile>): ScannedItem[] {
     }
   }
   const existing = new Set([...unique.values()].map((item) => `${item.category}:${normalizeTitle(item.title)}`))
+  const emitted = new Set([...unique.values()].map((item) => item.id))
+  // Une franchise entièrement découpée n'a plus de fiche parente : ses œuvres sont proposées seules.
+  const orphans = suggestions.filter((suggestion) => suggestion.parentId && !emitted.has(suggestion.parentId) && !existing.has(`${suggestion.category}:${normalizeTitle(suggestion.title)}`))
+    .map((suggestion) => ({ ...suggestion, parentId: undefined }))
   return [...unique.values()].flatMap((item) => [
     item,
     ...suggestions.filter((suggestion) => suggestion.parentId === item.id && !existing.has(`${suggestion.category}:${normalizeTitle(suggestion.title)}`)),
-  ])
+  ]).concat(orphans)
 }

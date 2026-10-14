@@ -70,11 +70,29 @@ Le numéro WhatsApp se règle dans **Administration → WhatsApp**, au format in
 - **Jeux PC** : définir des paliers de taille en Go, par exemple 1–49 Go et 50–100 Go, chacun avec son prix. La taille d’un jeu est arrondie au Go supérieur pour déterminer le palier. On peut aussi définir un nombre minimum de jeux dans la sélection et un prix fixe par jeu qui remplace alors les prix par taille.
 - Une même devise est utilisée pour toute la sélection. Les saisons et la taille de chaque fiche restent corrigeables dans l’administration.
 
+## Espace admin
+
+L'administration est accessible par le lien discret « Espace privé » en pied de page (aucun lien dans la navigation publique) et n'est pas indexée par les moteurs de recherche.
+
+- **Vue d'ensemble** : indicateurs (titres, affiches, descriptions, saisons), état de la boutique (WhatsApp, tarifs manquants), complétude par univers, derniers ajouts.
+- **Santé du catalogue** : propositions de titres propres (balises de release, suffixe « (5) », capitales criées) à appliquer une par une ou en lot, doublons probables, fiches incomplètes.
+- **Titres** : recherche, filtres par univers, statut et problème, sélection multiple (publier, masquer, compléter, supprimer avec confirmation saisie) et export CSV ou sauvegarde JSON.
+- **Compléter les fiches** : tâche de fond reprise après rechargement qui interroge AniList, MyAnimeList, Kitsu, TVMaze, TheTVDB, IGDB/RAWG/Steam et Wikipédia (résumé français en priorité). Seuls les champs vides sont remplis ; une description étrangère est traduite.
+- **Session et sécurité** : verrouillage automatique après 10 à 60 minutes d'inactivité (avertissement une minute avant, synchronisé entre onglets), déconnexion de tous les appareils, changement de mot de passe avec indicateur de robustesse.
+
 ## Scanner un dossier
 
 Dans l’onglet **Scanner un dossier**, l’admin choisit un dossier, y compris la racine d’un disque si le navigateur l’autorise. L’application examine localement les noms, chemins relatifs et tailles des fichiers pour proposer des séries, jeux, animés et novelas. Elle déduit les saisons de noms comme `S01E01` ou `Saison 1` et additionne les tailles des fichiers d’un jeu. Une prévisualisation permet de corriger la catégorie, le titre et les mesures avant l’import. Aucun contenu de fichier n’est envoyé au serveur ; seules les fiches confirmées sont enregistrées dans Supabase. La recherche d’affiche et de genres est tentée lors de l’import ; en l’absence de correspondance exacte, la fiche est enregistrée sans ces métadonnées et peut être corrigée ensuite.
 
 Pour un dossier comme `jeux PC`, chaque sous-dossier de jeu devient une fiche, y compris si les fichiers portent des extensions de données comme `.doi` ou `.bin`. Un dossier de franchise tel que `BATTLEFIELD` ou `CALL OF DUTY`, contenant plusieurs sous-dossiers de jeux et aucun fichier de jeu à sa racine, est découpé en une fiche par sous-dossier, avec la taille propre à chaque jeu. Les sous-dossiers techniques (`data`, `bin`, `engine`…) restent rattachés à leur jeu. Les images `.iso` et archives placées directement à la racine deviennent des fiches séparées. Les mentions de version et de distribution sont retirées du titre proposé. Si un jeu contient plusieurs archives distinctes, le scanner propose aussi des fiches individuelles non cochées pour vérification. La taille affichée correspond aux fichiers présents, pas à la taille après installation.
+
+Avant tout enregistrement, l'aperçu classe chaque titre en **nouveau**, **mise à jour** (saisons ou taille) ou **déjà à jour** (décoché par défaut). Règles de détection, éprouvées sur les disques de la collection :
+
+- les saisons viennent des sous-dossiers (`S1`, `Saison 3`, `Titre S02`, `2. Arc`) et des épisodes (`S04E01`, `Second Season`) ; le plus grand numéro l'emporte, si bien qu'un dossier contenant seulement `S04` compte 4 saisons ;
+- une suite sans numéro (*Noragami Aragoto*) ajoute une saison ; les dossiers VF/VOSTFR, films, OAV, coffrets `BOX 04` et dossiers d'un seul épisode ne comptent pas ;
+- un dossier de franchise (*toaru SAGA*, ou au moins trois œuvres sans numéro) est découpé en une fiche par œuvre ; les épisodes rangés en vrac (`Titre 22`, `Titre 23`) sont regroupés ;
+- une fiche existante est reconnue malgré un titre sale en base (« SCRUBS (9) ») ou grâce au titre lu dans les fichiers (souvent le titre anglais) ; **un import ne réduit jamais le nombre de saisons** ;
+- après l'import, les fiches nouvelles ou incomplètes sont envoyées automatiquement à la tâche « Compléter les fiches » (option décochable).
 
 Le navigateur ne peut pas parcourir silencieusement tous les disques : le dossier doit être sélectionné par l’admin. Les dossiers vides ne figurent pas dans la liste de fichiers transmise par le navigateur. La détection basée sur les noms peut nécessiter des corrections, notamment si les fichiers n’indiquent pas les saisons ou si un dossier mélange plusieurs titres.
 

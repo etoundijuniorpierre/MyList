@@ -1,4 +1,4 @@
-import { cachePosterUrl, isCachedPosterUrl, searchMetadata } from './metadata'
+import { cachePosterUrl, completeMetadata, isCachedPosterUrl, searchMetadata } from './metadata'
 import { uniqueExactMatch } from './titleMatch'
 import { safeUrl, translateSynopsisToFrench } from './media'
 import { supabase } from './supabase'
@@ -18,7 +18,7 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
       // doubling throughput over the original three-title search batches.
       while (authorized()) {
        while (job.completed < job.total && authorized()) {
-        const size = job.kind === 'repair-games' && job.phase === 'scan' ? 24 : job.kind === 'cache' ? 8 : 6
+        const size = job.kind === 'repair-games' && job.phase === 'scan' ? 24 : job.kind === 'cache' ? 8 : job.kind === 'complete' ? 4 : 6
         const ids = job.ids.slice(job.completed, job.completed + size)
         const { data, error } = await supabase.from('catalog_items').select('*').in('id', ids)
         if (error) throw new Error(error.message)
@@ -48,6 +48,33 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
               if (result.error) throw result.error
               if (!result.data) return { id: item.id, updated: 0, stored: 0, missing: 1 }
               return { id: item.id, updated: 1, stored: 1, missing: 0 }
+            }
+            if (job.kind === 'complete') {
+              // Toutes les sources sont consultées ; seuls les champs encore vides sont écrits.
+              const found = await completeMetadata(item)
+              if (!found) return { id: item.id, updated: 0, stored: 0, missing: 1 }
+              if (!authorized()) throw new Error('Session interrompue')
+              const patch: Record<string, unknown> = {}
+              const poster = found.poster_url ? safeUrl(found.poster_url) : undefined
+              if (poster && !item.poster_url) patch.poster_url = poster
+              if (found.genres?.length && !item.genres.length) patch.genres = found.genres
+              if (found.year && !item.year) patch.year = found.year
+              if (found.synopsis && !item.synopsis?.trim()) patch.synopsis = found.synopsis
+              if (found.source) { patch.source = found.source; patch.source_id = found.source_id ?? null; patch.source_url = safeUrl(found.source_url ?? null) ?? null }
+              if (!Object.keys(patch).length) return { id: item.id, updated: 0, stored: 0, missing: 1 }
+              const saved = await supabase!.from('catalog_items').update(patch).eq('id', item.id).select('id').maybeSingle()
+              if (saved.error) throw saved.error
+              if (!saved.data) throw new Error('La fiche trouvée n’a pas été enregistrée. Vérifiez les droits de modification dans Supabase.')
+              const [cachedPoster, translated] = await Promise.allSettled([
+                poster && patch.poster_url ? cachePosterUrl(poster) : Promise.resolve(null),
+                patch.synopsis && !found.synopsisInFrench ? translateSynopsisToFrench(found.synopsis!) : Promise.resolve(null),
+              ])
+              const followUp: Record<string, unknown> = {}
+              if (cachedPoster.status === 'fulfilled' && cachedPoster.value && isCachedPosterUrl(cachedPoster.value) && cachedPoster.value !== poster) followUp.poster_url = cachedPoster.value
+              if (translated.status === 'fulfilled' && translated.value && translated.value !== found.synopsis) followUp.synopsis = translated.value
+              if (Object.keys(followUp).length && authorized()) await supabase!.from('catalog_items').update(followUp).eq('id', item.id)
+              const stillMissing = (!item.poster_url && !patch.poster_url) || (!item.synopsis?.trim() && !patch.synopsis)
+              return { id: item.id, updated: 1, stored: Number(Boolean(followUp.poster_url)), missing: Number(stillMissing) }
             }
             if (job.kind === 'repair-games') {
               if (item.category !== 'games' || !item.poster_url || !(await isLandscapePoster(item.poster_url))) return { id: item.id, updated: 0, stored: 0, missing: 0 }
@@ -121,7 +148,7 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
        break
       }
       if (job.completed === job.total) {
-        job = { ...job, result: `${job.updated} fiche(s) enrichie(s), ${job.stored} affiche(s) conservée(s).${job.missing ? ` ${job.missing} fiche(s) restent à compléter.` : ''}` }
+        job = { ...job, result: `${job.updated} fiche(s) enrichie(s), ${job.stored} affiche(s) conservée(s).${job.missing ? ` ${job.missing} fiche(s) restent à compléter (aucune source fiable).` : ''}` }
         savePosterJob(job); publish(job)
       }
     } catch (error) {

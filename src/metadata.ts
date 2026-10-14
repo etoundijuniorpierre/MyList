@@ -1,4 +1,4 @@
-import type { Category, MediaFormat, MediaType, MetadataResult } from './types'
+import type { CatalogItem, Category, MediaFormat, MediaType, MetadataResult } from './types'
 import { normalizeTitle, titleKey } from './types'
 import { searchQueries } from './titleAliases'
 import { isExactTitle } from './titleMatch'
@@ -317,4 +317,121 @@ export async function cachePosterUrl(url: string | null): Promise<string | null>
     const { data, error } = await supabase.functions.invoke<{ url: string }>('cache-poster', { body: { url }, signal: AbortSignal.timeout(20_000) })
     return !error && data?.url?.startsWith(`${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/posters/`) ? data.url : url
   } catch { return url }
+}
+
+type WikiExtract = { query?: { pages?: { pageid: number; title: string; index?: number; extract?: string; description?: string }[] } }
+
+const wikiHints: Record<Category, string> = { series: 'série télévisée', novelas: 'telenovela', dramas: 'série télévisée', anime: 'anime', games: 'jeu vidéo' }
+
+/** Résumé d'introduction de Wikipédia en français : une description déjà dans la langue du site. */
+export async function frenchWikiSummary(query: string, category: Category): Promise<{ synopsis: string; source_url: string } | null> {
+  const url = new URL('https://fr.wikipedia.org/w/api.php')
+  const params = { action: 'query', generator: 'search', gsrsearch: `${query} ${wikiHints[category]}`, gsrnamespace: '0', gsrlimit: '5', prop: 'extracts|description', exintro: '1', explaintext: '1', exsentences: '5', exlimit: '5', format: 'json', formatversion: '2', origin: '*' }
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value))
+  try {
+    const response = await getJson<WikiExtract>(url.href)
+    const pages = [...(response.query?.pages ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    for (const page of pages) {
+      const extract = page.extract?.replace(/\s+/g, ' ').trim() ?? ''
+      if (extract.length < 60 || !isExactTitle(page.title.replace(/\s*\([^)]*\)$/, ''), query)) continue
+      // Une page d'homonymie liste plusieurs œuvres : elle ne décrit pas celle du catalogue.
+      if (/\b(?:peut désigner|peut faire référence|notamment porté par|est un titre porté par|homonymie)\b/i.test(extract.slice(0, 200)) || /homonymie/i.test(page.description ?? '')) continue
+      const detected = wikiCategory(`${page.description ?? ''} ${extract.slice(0, 320)}`)
+      const accepted = detected === category || (detected === 'series' && (category === 'dramas' || category === 'novelas')) || (detected === 'anime' && category === 'anime')
+      if (!accepted) continue
+      const cut = extract.length > 900 ? `${extract.slice(0, 900).replace(/\s+\S*$/, '')}…` : extract
+      return { synopsis: cut, source_url: `https://fr.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, '_'))}` }
+    }
+  } catch { /* Wikipédia reste un complément facultatif. */ }
+  return null
+}
+
+export interface Completion {
+  poster_url?: string
+  synopsis?: string
+  synopsisInFrench?: boolean
+  genres?: string[]
+  year?: number
+  source?: string
+  source_id?: string | null
+  source_url?: string | null
+  sources: string[]
+}
+
+const completionRank: Record<string, number> = { anilist: 0, 'jikan-anime': 1, kitsu: 2, tvmaze: 0, tvdb: 1, igdb: 0, rawg: 1, steam: 2, wikipedia: 8 }
+
+function compatibleResult(item: Pick<CatalogItem, 'category' | 'media_format' | 'year'>, result: MetadataResult) {
+  if (result.match !== 'exact' || result.category !== item.category) return false
+  if (item.category === 'anime' && result.media_format && result.media_format !== (item.media_format === 'film' ? 'film' : 'series')) return false
+  if (item.year && result.year && Math.abs(item.year - result.year) > 1) return false
+  return true
+}
+
+/**
+ * Cherche dans toutes les sources disponibles les informations qui manquent à une fiche.
+ * Seules les correspondances exactes et cohérentes (format, année) sont retenues, et rien n'est renvoyé
+ * si plusieurs œuvres homonymes d'années différentes restent possibles.
+ */
+export async function completeMetadata(item: CatalogItem): Promise<Completion | null> {
+  const need = { poster: !item.poster_url, synopsis: !item.synopsis?.trim(), genres: !item.genres.length, year: !item.year }
+  if (!Object.values(need).some(Boolean)) return null
+  const query = cleanTitle(item.title) || item.title.trim()
+  let results: MetadataResult[] = []
+  try { results = await searchMetadata(item.title, item.category, item.media_type, item.media_format, item.year) } catch { /* Les sources complémentaires restent interrogées. */ }
+  const present = new Set(results.map((result) => result.source))
+  if (need.synopsis || need.genres || need.poster) {
+    const extra: Promise<MetadataResult[]>[] = []
+    if (item.category === 'anime') {
+      if (!present.has('anilist')) extra.push(anilist(query))
+      if (!present.has('jikan-anime') && Date.now() >= jikanUnavailableUntil) extra.push(jikan(query))
+      if (!present.has('kitsu')) extra.push(kitsu(query))
+    } else if (item.category !== 'games') {
+      if (!present.has('tvmaze')) extra.push(tvmaze(query, item.category))
+      if (!present.has('tvdb')) extra.push(tvdb(query, item.category))
+    }
+    for (const outcome of await Promise.allSettled(extra)) if (outcome.status === 'fulfilled') results = mergeMetadataResults(results, outcome.value)
+  }
+  let compatible = results.filter((result) => compatibleResult(item, result))
+  if (!item.year) {
+    // Deux œuvres homonymes d'années éloignées : on ne choisit pas au hasard.
+    const years = [...new Set(compatible.map((result) => result.year).filter((year): year is number => Boolean(year)))].sort()
+    if (years.length > 1 && years.at(-1)! - years[0] > 1) {
+      const literal = compatible.filter((result) => normalizeTitle(result.title) === normalizeTitle(query))
+      const literalYears = new Set(literal.map((result) => result.year).filter(Boolean))
+      if (literalYears.size !== 1) return null
+      compatible = literal
+    }
+  }
+  compatible.sort((a, b) => (completionRank[a.source] ?? 5) - (completionRank[b.source] ?? 5))
+  const completion: Completion = { sources: [] }
+  const use = (result: MetadataResult) => { if (!completion.sources.includes(result.source)) completion.sources.push(result.source) }
+  if (need.poster) {
+    const poster = compatible.find((result) => result.poster_url && result.poster_url.startsWith('https://'))
+    if (poster) { completion.poster_url = poster.poster_url!; use(poster) }
+  }
+  if (need.genres) {
+    const genres = compatible.find((result) => result.genres.length && result.source !== 'wikipedia')
+    if (genres) { completion.genres = genres.genres.slice(0, 6); use(genres) }
+  }
+  if (need.year) {
+    const counts = new Map<number, number>()
+    for (const result of compatible) if (result.year) counts.set(result.year, (counts.get(result.year) ?? 0) + 1)
+    const year = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0]
+    if (year) completion.year = year
+  }
+  if (need.synopsis) {
+    const french = await frenchWikiSummary(query, item.category)
+    if (french) { completion.synopsis = french.synopsis; completion.synopsisInFrench = true; completion.sources.push('wikipedia-fr') }
+    else {
+      const described = compatible.find((result) => (result.synopsis?.length ?? 0) >= 40 && result.source !== 'wikipedia')
+      if (described) { completion.synopsis = described.synopsis!; completion.synopsisInFrench = false; use(described) }
+    }
+  }
+  const best = compatible[0]
+  if (best && ['scan', 'manual'].includes(item.source)) {
+    completion.source = best.source
+    completion.source_id = best.source_id
+    completion.source_url = best.source_url
+  }
+  return completion.sources.length || completion.year ? completion : null
 }

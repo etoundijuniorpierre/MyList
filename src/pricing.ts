@@ -35,3 +35,57 @@ export function validateGameTiers(tiers: GamePriceTier[]): string | null {
   }
   return null
 }
+
+/** Prix sans remise de volume : sert à afficher l'économie réalisée dans le panier. */
+export function standardItemPrice(item: CatalogItem, rules: PriceRule[], gameTiers: GamePriceTier[]): number | null {
+  if (item.category === 'games') {
+    const size = Math.ceil(Number(item.game_size_gb))
+    const tier = gameTiers.find((entry) => size >= entry.min_gb && size <= entry.max_gb)
+    return tier ? Number(tier.price) : null
+  }
+  const rule = rules.find((entry) => entry.category === (item.category === 'anime' && item.media_format === 'film' ? 'anime-film' : item.category))
+  if (rule?.standard_price == null) return null
+  if (item.media_format === 'film') return Number(rule.standard_price)
+  const seasons = Number(item.seasons_count)
+  return Number.isInteger(seasons) && seasons > 0 ? Number(rule.standard_price) * seasons : null
+}
+
+export interface DiscountProgress {
+  key: string
+  label: string
+  current: number
+  target: number
+  unit: string
+  reached: boolean
+  reward: string
+}
+
+/** Où en est le panier par rapport à chaque palier de remise configuré par l'admin. */
+export function discountProgress(selection: CatalogItem[], rules: PriceRule[], gameDiscount: GameCountDiscount, format: (amount: number, currency: string) => string): DiscountProgress[] {
+  const progress: DiscountProgress[] = []
+  const seasonsOf = (filter: (item: CatalogItem) => boolean) => selection.filter(filter).reduce((sum, item) => sum + (Number(item.seasons_count) || 0), 0)
+  const groups: { key: string; label: string; categories: PriceRule['category'][]; filter: (item: CatalogItem) => boolean }[] = [
+    { key: 'series-anime', label: 'Séries et animés', categories: ['series', 'anime'], filter: (item) => item.category === 'series' || (item.category === 'anime' && item.media_format !== 'film') },
+    { key: 'novelas', label: 'Novelas', categories: ['novelas'], filter: (item) => item.category === 'novelas' },
+    { key: 'dramas', label: 'Dramas', categories: ['dramas'], filter: (item) => item.category === 'dramas' },
+  ]
+  for (const group of groups) {
+    const current = seasonsOf(group.filter)
+    if (!current) continue
+    for (const category of group.categories) {
+      const rule = rules.find((entry) => entry.category === category)
+      if (!rule?.threshold_seasons || rule.threshold_price == null || !rule.currency) continue
+      if (group.key === 'series-anime' && !selection.some((item) => category === 'series' ? item.category === 'series' : item.category === 'anime' && item.media_format !== 'film')) continue
+      progress.push({
+        key: `${group.key}:${category}`, label: group.key === 'series-anime' ? (category === 'series' ? 'Séries' : 'Animés') : group.label,
+        current, target: rule.threshold_seasons, unit: 'saison', reached: current >= rule.threshold_seasons,
+        reward: `${format(Number(rule.threshold_price), rule.currency)} la saison`,
+      })
+    }
+  }
+  const games = selection.filter((item) => item.category === 'games').length
+  if (games && gameDiscount.min_games && gameDiscount.price_per_game != null && gameDiscount.currency) {
+    progress.push({ key: 'games', label: 'Jeux PC', current: games, target: gameDiscount.min_games, unit: 'jeu', reached: games >= gameDiscount.min_games, reward: `${format(Number(gameDiscount.price_per_game), gameDiscount.currency)} le jeu` })
+  }
+  return progress
+}

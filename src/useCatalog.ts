@@ -1,27 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
 import { fetchCatalogPages } from './catalogData'
+import { routeCategory } from './display'
 import type { CatalogItem, Category } from './types'
 
-const routeCategories: Record<string, Category> = { '/': 'series', '/series': 'series', '/jeux-pc': 'games', '/animes': 'anime', '/animes-mangas': 'anime', '/novelas': 'novelas', '/dramas': 'dramas' }
 type Scope = Category | 'all'
 
 export function useCatalog(path: string, isAdmin: boolean, selection: string[], demo: CatalogItem[]) {
   const [items, setItems] = useState<CatalogItem[]>(supabase ? [] : demo)
   const [ready, setReady] = useState<Set<string>>(new Set())
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [missing, setMissing] = useState<Set<string>>(new Set())
+  const [cartPending, setCartPending] = useState(false)
   const [revision, setRevision] = useState(0)
   const generation = useRef(0)
   const complete = useRef(new Set<string>())
   const inFlight = useRef(new Map<string, Promise<void>>())
-  const scope = path === '/admin' && isAdmin ? 'all' : routeCategories[path]
-  const selectionKey = [...selection].sort().join(',')
-  const cartScope = `cart:${selectionKey}`
+  const requested = useRef(new Set<string>())
+  const scope: Scope | undefined = path === '/admin' && isAdmin ? 'all' : routeCategory[path === '/animes-mangas' ? '/animes' : path]
 
   function reset() {
     generation.current++
-    complete.current.clear(); inFlight.current.clear()
-    setItems(supabase ? [] : demo); setReady(new Set()); setErrors({})
+    complete.current.clear(); inFlight.current.clear(); requested.current.clear()
+    setItems(supabase ? [] : demo); setReady(new Set()); setErrors({}); setMissing(new Set())
     setRevision(value => value + 1)
   }
 
@@ -56,30 +57,44 @@ export function useCatalog(path: string, isAdmin: boolean, selection: string[], 
     }), item => target === 'all' || item.category === target)
   }
 
-  function loadSelection() {
-    return load(cartScope, async () => {
-      const rows: CatalogItem[] = []
-      // Read only selected IDs; a restored basket never needs every category.
-      for (let offset = 0; offset < selection.length; offset += 100) {
-        const result = await supabase!.from('catalog_items').select('*').eq('active', true).in('id', selection.slice(offset, offset + 100))
-        if (result.error) throw result.error
-        rows.push(...result.data as CatalogItem[])
+  // Le panier peut contenir des titres d'autres univers : on ne lit que ceux qui ne sont pas déjà chargés.
+  const loadedIds = new Set(items.map(item => item.id))
+  const toFetch = selection.filter(id => !loadedIds.has(id) && !requested.current.has(id))
+  const toFetchKey = toFetch.sort().join(',')
+  useEffect(() => {
+    if (!supabase || !toFetch.length) return
+    const version = generation.current
+    toFetch.forEach(id => requested.current.add(id))
+    setCartPending(true)
+    void (async () => {
+      try {
+        const rows: CatalogItem[] = []
+        for (let offset = 0; offset < toFetch.length; offset += 100) {
+          const result = await supabase!.from('catalog_items').select('*').eq('active', true).in('id', toFetch.slice(offset, offset + 100))
+          if (result.error) throw result.error
+          rows.push(...result.data as CatalogItem[])
+        }
+        if (generation.current !== version) return
+        const found = new Set(rows.map(row => row.id))
+        setItems(current => [...new Map([...current, ...rows].map(item => [item.id, item])).values()])
+        setMissing(current => new Set([...current, ...toFetch.filter(id => !found.has(id))]))
+      } catch {
+        toFetch.forEach(id => requested.current.delete(id))
+      } finally {
+        if (generation.current === version) setCartPending(false)
       }
-      return rows
-    }, item => selection.includes(item.id))
-  }
+    })()
+  }, [toFetchKey, revision])
 
   // A privilege change invalidates pending responses and cached admin-only rows.
   useEffect(() => { reset() }, [isAdmin])
   useEffect(() => { if (scope) void loadScope(scope) }, [scope, isAdmin, revision])
-  useEffect(() => { if (path === '/selection') void loadSelection() }, [path, selectionKey, isAdmin, revision])
 
-  const key = path === '/selection' ? cartScope : scope
-  const error = key ? errors[key] ?? '' : ''
-  const loading = Boolean(supabase && key && !ready.has(key) && !ready.has('all') && !error)
+  const error = scope ? errors[scope] ?? '' : ''
+  const loading = Boolean(supabase && scope && !ready.has(scope) && !ready.has('all') && !error)
   async function refresh() {
     reset()
-    await Promise.all([scope ? loadScope(scope) : Promise.resolve(), path === '/selection' ? loadSelection() : Promise.resolve()])
+    if (scope) await loadScope(scope)
   }
-  return { items, loading, error, refresh }
+  return { items, loading, error, refresh, cartPending: cartPending || Boolean(supabase && toFetch.length), missing }
 }

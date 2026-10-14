@@ -1,6 +1,6 @@
 export const POSTER_JOB_KEY = 'mylist-poster-job-v1'
 export type PosterJob = {
-  version: 1; id: string; userId: string; kind: 'cache' | 'enrich' | 'repair-games'; ids: string[]
+  version: 1; id: string; userId: string; kind: 'cache' | 'enrich' | 'repair-games' | 'complete'; ids: string[]
   phase?: 'scan' | 'search'
   candidateIds?: string[]
   retryIds?: string[]
@@ -12,7 +12,7 @@ export function readPosterJob(): PosterJob | null {
   try {
     const job = JSON.parse(localStorage.getItem(POSTER_JOB_KEY) ?? 'null')
     return job?.version === 1 && typeof job.userId === 'string' && typeof job.id === 'string'
-      && ['cache', 'enrich', 'repair-games'].includes(job.kind) && Array.isArray(job.ids) && job.ids.every((id: unknown) => typeof id === 'string')
+      && ['cache', 'enrich', 'repair-games', 'complete'].includes(job.kind) && Array.isArray(job.ids) && job.ids.every((id: unknown) => typeof id === 'string')
       && (job.phase === undefined || ['scan', 'search'].includes(job.phase))
       && (job.candidateIds === undefined || (Array.isArray(job.candidateIds) && job.candidateIds.every((id: unknown) => typeof id === 'string')))
       && (job.retryIds === undefined || (Array.isArray(job.retryIds) && job.retryIds.every((id: unknown) => typeof id === 'string')))

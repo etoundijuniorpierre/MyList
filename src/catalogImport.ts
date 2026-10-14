@@ -1,6 +1,6 @@
 import type { CatalogItem, ItemInput, MetadataResult } from './types'
 import { normalizeTitle, titleKey } from './types'
-import type { ScannedItem } from './folderScan'
+import { cleanTitle, type ScannedItem } from './folderScan'
 
 export function unmatchedAnime(title: string): MetadataResult {
   const cleanTitle = title.trim()
@@ -13,9 +13,11 @@ export function unmatchedAnime(title: string): MetadataResult {
 }
 
 function importTitle(title: string) {
-  return normalizeTitle(title
+  const stripped = title
     .replace(/\s*\[(?:adn|crunchyroll|crunchy roll|netflix|disney\+?|prime video|wakanim|funimation)\]\s*$/i, '')
-    .replace(/\s*\[(?:\d+\s+)?fichiers?\]\s*$/i, ''))
+    .replace(/\s*\[(?:\d+\s+)?fichiers?\]\s*$/i, '')
+  // « SCRUBS (9) » déjà en base et « Scrubs » scanné désignent la même fiche : on compare les titres nettoyés.
+  return normalizeTitle(cleanTitle(stripped) || stripped)
 }
 
 type ScanAlias = { title: string; seasonFloor?: number; preserveExistingSeasons?: boolean }
@@ -107,7 +109,12 @@ export function scannedCatalogMatch(row: ScannedItem, items: CatalogItem[]) {
     return catalogIdentity(category, mediaType, associatedTitle, mediaFormat)
   }
   const key = identity(row.category, row.media_type, alias.title, row.media_format)
-  const existing = items.find((item) => identity(item.category, item.media_type, item.title, item.media_format) === key)
+  let existing = items.find((item) => identity(item.category, item.media_type, item.title, item.media_format) === key)
+  // Le dossier porte parfois le titre japonais et les fichiers le titre anglais (ou l'inverse).
+  if (!existing && row.alt_title) {
+    const altKey = identity(row.category, row.media_type, row.alt_title, row.media_format)
+    existing = items.find((item) => identity(item.category, item.media_type, item.title, item.media_format) === altKey)
+  }
   return { alias, existing, key }
 }
 
@@ -157,7 +164,62 @@ export function scannedItemInput(row: ScannedItem, existing?: CatalogItem): Item
     source_id: existing?.source_id ?? null,
     source_url: existing?.source_url ?? null,
     active: existing?.active ?? true,
-    seasons_count: row.category === 'games' ? null : seasonsMissing ? existing?.seasons_count ?? row.seasons_count : row.seasons_count ?? existing?.seasons_count ?? null,
+    // Un disque ne retire jamais de saisons : « S04 » seul sur le disque d'hiver ne ramène pas une fiche de 5 saisons à 4.
+    seasons_count: row.category === 'games' ? null : seasonsMissing ? existing?.seasons_count ?? row.seasons_count
+      : Math.max(row.seasons_count ?? 0, existing?.seasons_count ?? 0) || null,
     game_size_gb: row.category === 'games' ? row.game_size_gb ?? existing?.game_size_gb ?? null : null,
   }
+}
+
+export type ScanPlanStatus = 'new' | 'update' | 'unchanged'
+
+export interface ScanPlanEntry {
+  key: string
+  rows: ScannedItem[]
+  existing?: CatalogItem
+  status: ScanPlanStatus
+  changes: string[]
+  input: ItemInput
+}
+
+/**
+ * Prépare l'import d'un scan sans rien écrire : fusionne les lignes qui désignent la même fiche,
+ * les rapproche du catalogue (titre nettoyé, titre alternatif) et décrit ce qui changera.
+ */
+export function planScanImport(rows: ScannedItem[], items: CatalogItem[]): ScanPlanEntry[] {
+  const merged = new Map<string, { row: ScannedItem; rows: ScannedItem[]; existing?: CatalogItem }>()
+  for (const row of rows) {
+    if (isCatalogNoiseTitle(row.title)) continue
+    const match = scannedCatalogMatch(row, items)
+    const title = match.existing?.title ?? match.alias.title
+    const key = match.existing ? `id:${match.existing.id}` : catalogIdentity(row.category, row.media_type, title, row.media_format)
+    const seasons = row.category === 'games' ? null : match.alias.preserveExistingSeasons
+      ? match.existing?.seasons_count ?? row.seasons_count
+      : Math.max(row.seasons_count ?? 0, match.alias.seasonFloor ?? 0) || null
+    const normalized: ScannedItem = { ...row, title, seasons_count: seasons }
+    const previous = merged.get(key)
+    if (!previous) { merged.set(key, { row: normalized, rows: [row], existing: match.existing }); continue }
+    merged.set(key, {
+      row: {
+        ...previous.row,
+        seasons_count: Math.max(previous.row.seasons_count ?? 0, normalized.seasons_count ?? 0) || null,
+        game_size_gb: Math.max(previous.row.game_size_gb ?? 0, normalized.game_size_gb ?? 0) || null,
+        file_count: previous.row.file_count + normalized.file_count,
+        warning: previous.row.warning?.includes('Saison non indiquée') && !normalized.warning?.includes('Saison non indiquée') ? normalized.warning : previous.row.warning,
+      },
+      rows: [...previous.rows, row],
+      existing: previous.existing ?? match.existing,
+    })
+  }
+  return [...merged].map(([key, { row, rows: sources, existing }]) => {
+    const input = scannedItemInput(row, existing)
+    const changes: string[] = []
+    if (existing) {
+      if (input.category !== 'games' && (input.seasons_count ?? 0) !== (existing.seasons_count ?? 0)) changes.push(`Saisons ${existing.seasons_count ?? '?'} → ${input.seasons_count ?? '?'}`)
+      if (input.category === 'games' && input.game_size_gb && Math.abs((existing.game_size_gb ?? 0) - input.game_size_gb) > Math.max(0.05, input.game_size_gb * 0.02)) changes.push(`Taille ${existing.game_size_gb ?? '?'} → ${input.game_size_gb} Go`)
+    }
+    if (sources.length > 1) changes.push(`${sources.length} dossiers fusionnés`)
+    const status: ScanPlanStatus = !existing ? 'new' : changes.some((change) => !change.endsWith('fusionnés')) ? 'update' : 'unchanged'
+    return { key, rows: sources, existing, status, changes, input }
+  })
 }
