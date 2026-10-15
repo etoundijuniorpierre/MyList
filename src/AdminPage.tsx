@@ -20,7 +20,7 @@ import { HealthTab } from './admin/HealthTab'
 import { SecurityTab } from './admin/SecurityTab'
 import { categories, type CatalogItem, type Category, type GameCountDiscount, type GamePriceTier, type ItemInput, type MetadataResult, type PriceRule, type SiteSettings, titleKey } from './types'
 
-export default function AdminPage({ catalogLoading, user, isAdmin, authReady, items, prices, gameTiers, gameDiscount, settings, onChanged, posterJobRunning, onRunPosterJob, idleMinutes, onIdleMinutes, onSignOut }: { catalogLoading: boolean; user: User | null; isAdmin: boolean; authReady: boolean; items: CatalogItem[]; prices: PriceRule[]; gameTiers: GamePriceTier[]; gameDiscount: GameCountDiscount; settings: SiteSettings; onChanged: () => Promise<void>; posterJobRunning: boolean; onRunPosterJob: (kind: PosterJobKind, filter: Category | 'all', ids?: string[]) => Promise<void>; idleMinutes: number; onIdleMinutes: (minutes: number) => void; onSignOut: (reason: 'inactivite' | 'deconnexion', scope?: 'local' | 'global') => Promise<void> }) {
+export default function AdminPage({ catalogLoading, user, isAdmin, authReady, items, prices, gameTiers, gameDiscount, settings, onChanged, onMerged, posterJobRunning, onRunPosterJob, idleMinutes, onIdleMinutes, onSignOut }: { catalogLoading: boolean; user: User | null; isAdmin: boolean; authReady: boolean; items: CatalogItem[]; prices: PriceRule[]; gameTiers: GamePriceTier[]; gameDiscount: GameCountDiscount; settings: SiteSettings; onChanged: () => Promise<void>; onMerged: (removedId: string, keptId: string) => void; posterJobRunning: boolean; onRunPosterJob: (kind: PosterJobKind, filter: Category | 'all', ids?: string[]) => Promise<void>; idleMinutes: number; onIdleMinutes: (minutes: number) => void; onSignOut: (reason: 'inactivite' | 'deconnexion', scope?: 'local' | 'global') => Promise<void> }) {
   const [tab, setTab] = useState<AdminTab>('overview')
   const [issueFilter, setIssueFilter] = useState<HealthIssue | ''>('')
   const [autoComplete, setAutoComplete] = useState(true)
@@ -123,19 +123,27 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
     }
     if (!clean.title || isCatalogNoiseTitle(clean.title)) throw new Error('Le nom du dossier ne correspond pas à un titre exploitable.')
     const duplicate = items.find((item) => item.id !== id && (sameCatalogTitle(item, clean) || (clean.source_id && item.category === clean.category && item.source === clean.source && item.source_id === clean.source_id)))
-    if (id && duplicate) throw new Error(`« ${clean.title} » existe déjà. Ouvrez cette fiche existante pour la mettre à jour.`)
     const target = id ?? duplicate?.id
     const existing = items.find((item) => item.id === target)
-    const payload = { ...mergeCatalogUpdate(clean, existing),
-      title: !id && existing ? existing.title : clean.title,
+    const edited = id ? items.find((item) => item.id === id) : undefined
+    const payload = { ...mergeCatalogUpdate(clean, existing, id && duplicate ? edited : undefined),
+      title: id && duplicate ? duplicate.title : !id && existing ? existing.title : clean.title,
       title_key: existing?.title_key ?? clean.title_key,
     }
     const response = target ? await supabase.from('catalog_items').update(payload).eq('id', target).select('id').single() : await supabase.from('catalog_items').insert(payload).select('id').single()
     if (response.error) throw response.error
+    if (id && duplicate) {
+      const removed = await supabase.from('catalog_items').delete().eq('id', id).select('id').maybeSingle()
+      if (removed.error || !removed.data) {
+        await onChanged()
+        throw new Error(`La fiche existante « ${duplicate.title} » a été mise à jour, mais l’ancienne fiche n’a pas pu être retirée. Réessayez depuis le catalogue.`)
+      }
+      onMerged(id, response.data.id)
+    }
     scheduleSavedEnrichment(response.data.id, payload.synopsis, payload.poster_url)
     if (refresh) {
       await onChanged()
-      showSuccess(target ? 'Fiche mise à jour sans doublon.' : 'Titre ajouté au catalogue.')
+      showSuccess(id && duplicate ? `« ${duplicate.title} » a été fusionnée avec la fiche sélectionnée.` : target ? 'Fiche mise à jour sans doublon.' : 'Titre ajouté au catalogue.')
       setEditing(null); setSelectedResult(null); setManual(false)
     }
     return response.data.id as string

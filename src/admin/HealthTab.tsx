@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowRight, Check, Copy, Sparkles, WandSparkles } from 'lucide-react'
+import { ArrowRight, Check, Copy, Languages, Sparkles, WandSparkles } from 'lucide-react'
 import { supabase } from '../supabase'
 import { Cover } from '../media'
 import { kindLabel, measureLabel, plural } from '../display'
@@ -33,6 +33,7 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onMessa
   const [shown, setShown] = useState(40)
   const pending = suggestions.filter(({ item }) => !skipped.has(item.id))
   const incomplete = items.filter((item) => !item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year)
+  const translatable = items.filter((item) => Boolean(item.synopsis?.trim()))
 
   async function rename(list: { item: CatalogItem; suggestion: NonNullable<ReturnType<typeof suggestTitle>> }[]) {
     if (!supabase || !list.length) return
@@ -61,8 +62,9 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onMessa
   return <div className="admin-health">
     <section className="admin-card">
       <div className="admin-panel-head"><div><h2>Fiches incomplètes</h2><p>Cliquez sur un problème pour voir les titres concernés.</p></div>
-        <button type="button" className="button-primary" disabled={!incomplete.length || posterJobRunning} onClick={() => void onRunPosterJob('complete', 'all', incomplete.map((item) => item.id))}><Sparkles size={16} /> Compléter {plural(incomplete.length, 'fiche')}</button></div>
+        <div className="admin-row-actions"><button type="button" disabled={!translatable.length || posterJobRunning} onClick={() => void onRunPosterJob('translate', 'all', translatable.map((item) => item.id))}><Languages size={16} /> Traduire {plural(translatable.length, 'description')}</button><button type="button" className="button-primary" disabled={!incomplete.length || posterJobRunning} onClick={() => void onRunPosterJob('complete', 'all', incomplete.map((item) => item.id))}><Sparkles size={16} /> Compléter {plural(incomplete.length, 'fiche')}</button></div></div>
       <div className="issue-chips">{(Object.entries(counts) as [HealthIssue, number][]).map(([issue, count]) => <button type="button" key={issue} className={`issue-chip ${count ? '' : 'is-ok'}`} disabled={!count} onClick={() => onShowIssue(issue)}><span>{issueLabels[issue]}</span><strong>{count.toLocaleString('fr-FR')}</strong></button>)}</div>
+      {counts.measure > 0 && <p className="scan-help">Les fiches sans mesure doivent être vérifiées à partir de vos fichiers ou de la fiche de l’œuvre. Cliquez sur « Saisons ou taille manquantes » ci-dessus pour les ouvrir et saisir une valeur exacte.</p>}
     </section>
 
     <section className="admin-card">

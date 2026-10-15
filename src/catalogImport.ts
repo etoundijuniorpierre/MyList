@@ -130,19 +130,19 @@ export function sameCatalogTitle(left: Pick<CatalogItem, 'category' | 'media_typ
   return catalogIdentity(left.category, left.media_type, left.title, left.media_format) === catalogIdentity(right.category, right.media_type, right.title, right.media_format)
 }
 
-export function mergeCatalogUpdate(input: ItemInput, existing?: CatalogItem): ItemInput {
-  if (!existing) return input
+export function mergeCatalogUpdate(input: ItemInput, existing?: CatalogItem, fallback?: CatalogItem): ItemInput {
+  if (!existing && !fallback) return input
   return {
     ...input,
-    synopsis: input.synopsis?.trim() ? input.synopsis : existing.synopsis,
-    poster_url: input.poster_url ?? existing.poster_url,
-    genres: input.genres.length ? input.genres : existing.genres,
-    year: input.year ?? existing.year,
-    source: input.source === 'manual' ? existing.source : input.source,
-    source_id: input.source_id ?? existing.source_id,
-    source_url: input.source_url ?? existing.source_url,
-    seasons_count: input.seasons_count ?? existing.seasons_count,
-    game_size_gb: input.game_size_gb ?? existing.game_size_gb,
+    synopsis: input.synopsis?.trim() ? input.synopsis : existing?.synopsis ?? fallback?.synopsis ?? null,
+    poster_url: input.poster_url ?? existing?.poster_url ?? fallback?.poster_url ?? null,
+    genres: input.genres.length ? input.genres : existing?.genres.length ? existing.genres : fallback?.genres ?? [],
+    year: input.year ?? existing?.year ?? fallback?.year ?? null,
+    source: input.source === 'manual' ? existing?.source ?? fallback?.source ?? 'manual' : input.source,
+    source_id: input.source_id ?? existing?.source_id ?? fallback?.source_id ?? null,
+    source_url: input.source_url ?? existing?.source_url ?? fallback?.source_url ?? null,
+    seasons_count: input.seasons_count ?? existing?.seasons_count ?? fallback?.seasons_count ?? null,
+    game_size_gb: input.game_size_gb ?? existing?.game_size_gb ?? fallback?.game_size_gb ?? null,
   }
 }
 

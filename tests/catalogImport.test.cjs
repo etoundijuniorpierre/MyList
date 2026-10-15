@@ -82,3 +82,23 @@ test('une modification partielle conserve les métadonnées et applique les nouv
   assert.equal(corrected.seasons_count, 2)
   assert.equal(corrected.year, 2025)
 })
+
+test('la fusion d’une fiche en doublon reprend les champs utiles de la fiche retirée', () => {
+  const kept = {
+    id: 'kept', category: 'anime', media_type: 'anime', title: 'One Piece', title_key: 'anime:anime:one-piece',
+    synopsis: null, poster_url: null, genres: [], year: null, source: 'manual', source_id: null,
+    source_url: null, active: true, seasons_count: 22, game_size_gb: null,
+  }
+  const removed = {
+    ...kept, id: 'removed', title: 'One Piece [HD]', title_key: 'anime:anime:one-piece-hd',
+    synopsis: 'Description existante', poster_url: 'https://example.com/one-piece.jpg', genres: ['Aventure'],
+    year: 1999, source: 'jikan-anime', source_id: '21', source_url: 'https://example.com/anime/21',
+  }
+  const result = mergeCatalogUpdate({ ...kept, synopsis: null, poster_url: null, genres: [], year: null, source: 'manual', source_id: null, source_url: null }, kept, removed)
+  assert.equal(result.synopsis, removed.synopsis)
+  assert.equal(result.poster_url, removed.poster_url)
+  assert.deepEqual(result.genres, removed.genres)
+  assert.equal(result.year, removed.year)
+  assert.equal(result.source_id, removed.source_id)
+  assert.equal(result.seasons_count, kept.seasons_count)
+})

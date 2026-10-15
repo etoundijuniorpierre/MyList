@@ -110,10 +110,11 @@ function App() {
     const { isCachedPosterUrl } = await import('./metadata')
     const ids = explicitIds ?? items.filter(item => kind === 'repair-games'
       ? item.category === 'games' && Boolean(item.poster_url)
+      : kind === 'translate' ? Boolean(item.synopsis?.trim())
       : (filter === 'all' || item.category === filter) && (kind === 'cache' ? Boolean(item.poster_url && !isCachedPosterUrl(item.poster_url))
         : kind === 'complete' ? !item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year : !item.poster_url)).map(item => item.id)
     if (!ids.length) return
-    const labels: Record<PosterJobKind, string> = { cache: 'Affiches à conserver', 'repair-games': 'Tri initial des jaquettes de jeux', enrich: 'Affiches manquantes à rechercher', complete: 'Compléter les fiches (affiches, descriptions, genres)' }
+    const labels: Record<PosterJobKind, string> = { cache: 'Affiches à conserver', 'repair-games': 'Tri initial des jaquettes de jeux', enrich: 'Affiches manquantes à rechercher', complete: 'Compléter les fiches (affiches, descriptions, saisons)', translate: 'Traduire les descriptions en français' }
     const job: PosterJob = { version: 1, id: crypto.randomUUID(), userId: user.id, kind, ids, ...(kind === 'repair-games' ? { phase: 'scan' as const, candidateIds: [] } : {}), total: ids.length, completed: 0, updated: 0, stored: 0, missing: 0, label: labels[kind] }
     try { savePosterJob(job); setPosterJob(job) }
     catch { setLoadError('Impossible de sauvegarder la progression dans ce navigateur. Libérez de l’espace puis réessayez.') }
@@ -121,7 +122,8 @@ function App() {
 
   function retryPosterJob() {
     if (!posterJob) return
-    const job = { ...posterJob, id: crypto.randomUUID(), error: undefined }
+    const ids = posterJob.retryIds?.length ? posterJob.retryIds : posterJob.ids
+    const job = { ...posterJob, id: crypto.randomUUID(), ids, total: ids.length, completed: 0, updated: 0, stored: 0, missing: 0, retryIds: [], retryAttempts: 0, result: undefined, error: undefined }
     try { savePosterJob(job); setPosterJob(job) } catch { setLoadError('La sauvegarde de progression est indisponible.') }
   }
 
@@ -199,6 +201,9 @@ function App() {
     setCartBump(value => value + 1)
     notify(removing ? `« ${item.title} » retiré du panier` : `« ${item.title} » ajouté au panier`, { label: 'Annuler', run: () => setSelection(before) })
   }, [notify])
+  const remapSelection = useCallback((removedId: string, keptId: string) => {
+    setSelection(current => [...new Set(current.map(id => id === removedId ? keptId : id))])
+  }, [])
 
   const activeItems = useMemo(() => items.filter((item) => item.active), [items])
   const selectedItems = useMemo(() => selection.map((id) => activeItems.find((item) => item.id === id)).filter((item): item is CatalogItem => Boolean(item)), [selection, activeItems])
@@ -246,7 +251,7 @@ function App() {
           <span>{posterJob.result ?? posterJob.error ?? (posterJob.total ? `${posterJob.completed} / ${posterJob.total} traité(s) · ${posterJob.updated} enrichie(s)` : 'Préparation…')}</span>
           {posterJobRunning && <progress value={posterJob.completed} max={posterJob.total || undefined} />}
         </div>
-        {posterJob.error && <button type="button" onClick={retryPosterJob}>Reprendre</button>}
+        {(posterJob.error || (posterJob.result && posterJob.retryIds?.length)) && <button type="button" onClick={retryPosterJob}>{posterJob.result ? `Relancer ${posterJob.retryIds?.length} échec(s)` : 'Reprendre'}</button>}
         {(posterJob.result || posterJob.error) && <button type="button" aria-label="Fermer le résultat" onClick={() => { localStorage.removeItem(POSTER_JOB_KEY); setPosterJob(null) }}><X size={16} /></button>}
       </div>}
 
@@ -256,7 +261,7 @@ function App() {
         <Route path="/animes-mangas" element={<Navigate to="/animes" replace />} />
         <Route path="/selection" element={<SelectionPage loading={cartPending || settingsLoading} />} />
         <Route path="/connexion" element={<AuthPage isAdmin={isAdmin} adminReady={adminReady} />} />
-        <Route path="/admin" element={<AdminPage catalogLoading={loading || settingsLoading} user={user} isAdmin={isAdmin} authReady={authReady && adminReady} items={items} prices={prices} gameTiers={gameTiers} gameDiscount={gameDiscount} settings={settings} onChanged={refreshCatalog} posterJobRunning={posterJobRunning} onRunPosterJob={runPosterJob} idleMinutes={idleMinutes} onIdleMinutes={setIdleMinutes} onSignOut={signOut} />} />
+        <Route path="/admin" element={<AdminPage catalogLoading={loading || settingsLoading} user={user} isAdmin={isAdmin} authReady={authReady && adminReady} items={items} prices={prices} gameTiers={gameTiers} gameDiscount={gameDiscount} settings={settings} onChanged={refreshCatalog} onMerged={remapSelection} posterJobRunning={posterJobRunning} onRunPosterJob={runPosterJob} idleMinutes={idleMinutes} onIdleMinutes={setIdleMinutes} onSignOut={signOut} />} />
         <Route path="*" element={<NotFound />} />
       </Routes></Suspense>
 

@@ -18,7 +18,7 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
       // doubling throughput over the original three-title search batches.
       while (authorized()) {
        while (job.completed < job.total && authorized()) {
-        const size = job.kind === 'repair-games' && job.phase === 'scan' ? 24 : job.kind === 'cache' ? 8 : job.kind === 'complete' ? 4 : 6
+        const size = job.kind === 'repair-games' && job.phase === 'scan' ? 24 : job.kind === 'cache' ? 8 : job.kind === 'translate' ? 2 : job.kind === 'complete' ? 4 : 6
         const ids = job.ids.slice(job.completed, job.completed + size)
         const { data, error } = await supabase.from('catalog_items').select('*').in('id', ids)
         if (error) throw new Error(error.message)
@@ -39,6 +39,16 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
         }
         const outcomes = await Promise.all((data as CatalogItem[]).map(async item => {
           try {
+            if (job.kind === 'translate') {
+              if (!item.synopsis?.trim()) return { id: item.id, updated: 0, stored: 0, missing: 0 }
+              const translated = await translateSynopsisToFrench(item.synopsis)
+              if (!translated || translated === item.synopsis.trim()) return { id: item.id, updated: 0, stored: 0, missing: 0 }
+              if (!authorized()) throw new Error('Session interrompue')
+              const saved = await supabase!.from('catalog_items').update({ synopsis: translated }).eq('id', item.id).eq('synopsis', item.synopsis).select('id').maybeSingle()
+              if (saved.error) throw saved.error
+              if (!saved.data) throw new Error('La traduction a été faite, mais la fiche a changé entre-temps. Relancez la traduction.')
+              return { id: item.id, updated: 1, stored: 0, missing: 0 }
+            }
             if (job.kind === 'cache') {
               if (isCachedPosterUrl(item.poster_url)) return { id: item.id, updated: 0, stored: 0, missing: 0 }
               const poster = await cachePosterUrl(item.poster_url)
@@ -142,13 +152,15 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
           await new Promise(resolve => setTimeout(resolve, 1800))
           continue
         }
-        job = { ...job, missing: job.missing + job.retryIds!.length, retryIds: [] }
+        job = { ...job, missing: job.missing + job.retryIds!.length }
         savePosterJob(job); publish(job)
       }
        break
       }
       if (job.completed === job.total) {
-        job = { ...job, result: `${job.updated} fiche(s) enrichie(s), ${job.stored} affiche(s) conservée(s).${job.missing ? ` ${job.missing} fiche(s) restent à compléter (aucune source fiable).` : ''}` }
+        job = { ...job, result: job.kind === 'translate'
+          ? `${job.updated} description(s) traduite(s) en français.${job.missing ? ` ${job.missing} échec(s) à relancer.` : ''}`
+          : `${job.updated} fiche(s) enrichie(s), ${job.stored} affiche(s) conservée(s).${job.missing ? ` ${job.missing} fiche(s) restent à compléter (aucune source fiable).` : ''}` }
         savePosterJob(job); publish(job)
       }
     } catch (error) {

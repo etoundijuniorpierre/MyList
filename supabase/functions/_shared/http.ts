@@ -1,7 +1,7 @@
 export function corsHeaders(request: Request) {
   const origin = request.headers.get('origin')
-  const allowed = (Deno.env.get('ALLOWED_ORIGINS') ?? 'http://localhost:5173').split(',').map((entry) => entry.trim())
-  return origin && allowed.includes(origin) ? {
+  const allowed = new Set(['https://mylist-rho.vercel.app', 'http://localhost:5173', ...(Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)])
+  return origin && allowed.has(origin) ? {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -16,5 +16,5 @@ export function json(request: Request, body: unknown, status = 200) {
 export function originAllowed(request: Request) {
   const origin = request.headers.get('origin')
   if (!origin) return true
-  return (Deno.env.get('ALLOWED_ORIGINS') ?? 'http://localhost:5173').split(',').map((entry) => entry.trim()).includes(origin)
+  return new Set(['https://mylist-rho.vercel.app', 'http://localhost:5173', ...(Deno.env.get('ALLOWED_ORIGINS') ?? '').split(',').map((entry) => entry.trim()).filter(Boolean)]).has(origin)
 }

@@ -26,9 +26,27 @@ export function safeUrl(url: string | null) {
 export async function translateSynopsisToFrench(synopsis: string | null) {
   const text = synopsis?.trim()
   if (!text || !supabase) return text || null
-  const { data, error } = await supabase.functions.invoke('translate-description', { body: { text } })
-  if (error || typeof data?.text !== 'string' || !data.text.trim()) throw new Error('La traduction française de la description a échoué. Réessayez avant l’enregistrement.')
-  return data.text.trim()
+  // Keep each request comfortably below the edge function and upstream URL limits.
+  const chunks: string[] = []
+  let chunk = ''
+  for (const sentence of text.match(/[^.!?\n]+[.!?\n]*|[.!?\n]+/g) ?? [text]) {
+    if (chunk && chunk.length + sentence.length > 1400) { chunks.push(chunk.trim()); chunk = '' }
+    if (sentence.length > 1400) {
+      const words = sentence.split(/\s+/)
+      for (const word of words) {
+        if (chunk && chunk.length + word.length + 1 > 1400) { chunks.push(chunk.trim()); chunk = '' }
+        chunk += `${chunk ? ' ' : ''}${word}`
+      }
+    } else chunk += sentence
+  }
+  if (chunk.trim()) chunks.push(chunk.trim())
+  const translated: string[] = []
+  for (const part of chunks) {
+    const { data, error } = await supabase.functions.invoke('translate-description', { body: { text: part } })
+    if (error || typeof data?.text !== 'string' || !data.text.trim()) throw new Error('La traduction française de la description a échoué. Vérifiez l’accès à la fonction Supabase puis relancez-la.')
+    translated.push(data.text.trim())
+  }
+  return translated.join(' ')
 }
 
 export function Cover({ item, className = '', priority = false, sizes = '(max-width: 480px) 45vw, (max-width: 900px) 30vw, 220px' }: { item: Pick<CatalogItem, 'title' | 'poster_url' | 'category'>; className?: string; priority?: boolean; sizes?: string }) {

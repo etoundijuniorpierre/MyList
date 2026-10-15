@@ -28,6 +28,12 @@ test('le tri initial des jaquettes et ses candidates restent enregistrés après
   assert.deepEqual(readPosterJob(), saved)
 })
 
+test('une traduction longue peut reprendre sa progression après navigation', () => {
+  const saved = { version: 1, id: 'translate', userId: 'admin', kind: 'translate', ids: ['a', 'b'], retryIds: ['b'], label: 'Traduction', completed: 1, total: 2, updated: 1, stored: 0, missing: 0 }
+  savePosterJob(saved)
+  assert.deepEqual(readPosterJob(), saved)
+})
+
 test('une progression endommagée ou un compteur hors limites n’est jamais repris', () => {
   storage.set(POSTER_JOB_KEY, '{')
   assert.equal(readPosterJob(), null)
