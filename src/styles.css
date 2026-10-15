@@ -776,6 +776,19 @@ kbd { font-family: var(--body); font-size: 10px; font-weight: 700; color: var(--
   .admin-search { flex-direction: column; }
   .search-palette { margin-top: 12px; }
 }
+@media (max-width: 680px), (max-width: 980px) and (pointer: coarse) {
+  .site-header, .main-nav { background: #09090d; }
+  .site-header, .main-nav, .catalog-toolbar, .card-kind, .card-round, .cart-bar {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .media-card { animation: none; transition: border-color .2s; }
+  .media-card:hover, .media-card:focus-within { transform: none; box-shadow: none; }
+  .cover img, .portal, .portal-stack .cover { transition: none; }
+  .media-card:hover .cover img, .portal:hover { transform: none; }
+  .detail-backdrop { display: none; }
+  .detail-dialog::backdrop, .search-palette::backdrop { backdrop-filter: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
   .marquee-track { animation: none !important; }

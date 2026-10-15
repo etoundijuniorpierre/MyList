@@ -50,6 +50,13 @@ export interface SiteSettings {
   whatsapp_number: string
 }
 
+export interface PricingSettings {
+  prices: PriceRule[]
+  gameTiers: GamePriceTier[]
+  gameDiscount: GameCountDiscount
+  settings: SiteSettings
+}
+
 export interface MetadataResult extends ItemInput {
   match?: 'exact' | 'approximate'
   /** Autres titres de l'œuvre (romaji, anglais, natif) : servent au rapprochement avec un nom de dossier. */

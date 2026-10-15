@@ -58,7 +58,7 @@ export function Cover({ item, className = '', priority = false, sizes = '(max-wi
   const imageVariant = (width: number) => `/api/poster?path=${encodeURIComponent(optimizedPath ?? '')}&w=${width}`
   useEffect(() => { setFailed(false) }, [image])
   return <div className={`cover cover-${item.category} ${className}`}>
-    {image && !failed ? <img className="cover-art" src={optimizedPath ? imageVariant(384) : image} srcSet={optimizedPath ? `${imageVariant(384)} 384w, ${imageVariant(640)} 640w` : undefined} sizes={sizes} width={384} height={576} alt="" decoding="async" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} onError={(event) => { if (optimizedPath && event.currentTarget.dataset.fallback !== 'true') { event.currentTarget.dataset.fallback = 'true'; event.currentTarget.removeAttribute('srcset'); event.currentTarget.src = image } else setFailed(true) }} />
+    {image && !failed ? <img className="cover-art" src={optimizedPath ? imageVariant(384) : image} srcSet={optimizedPath ? `${imageVariant(240)} 240w, ${imageVariant(384)} 384w, ${imageVariant(640)} 640w` : undefined} sizes={sizes} width={384} height={576} alt="" decoding="async" loading={priority ? 'eager' : 'lazy'} fetchPriority={priority ? 'high' : 'auto'} onError={(event) => { if (optimizedPath && event.currentTarget.dataset.fallback !== 'true') { event.currentTarget.dataset.fallback = 'true'; event.currentTarget.removeAttribute('srcset'); event.currentTarget.src = image } else setFailed(true) }} />
       : <div className="cover-fallback" style={{ '--hue': titleHue(item.title) } as CSSProperties} aria-hidden="true"><span className="cover-grain" /><small>{categoryLabel(item.category)}</small><strong>{item.title}</strong></div>}
   </div>
 }

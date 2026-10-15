@@ -6,10 +6,12 @@ import { categoryMeta, kindLabel, plural, setPageMeta } from '../display'
 import { categories, type CatalogItem } from '../types'
 import { useHomeData } from '../useHomeData'
 import { useSite } from './context'
+import { useLightweightDisplay } from '../useLightweightDisplay'
 
 export function HomePage({ demo }: { demo: CatalogItem[] }) {
   const { shelves, error } = useHomeData(demo)
   const { openSearch, selection } = useSite()
+  const lightweight = useLightweightDisplay()
   useEffect(() => { setPageMeta('') }, [])
   const total = shelves?.reduce((sum, shelf) => sum + shelf.count, 0) ?? 0
   const posters = shelves?.flatMap((shelf) => shelf.latest) ?? []
@@ -18,9 +20,9 @@ export function HomePage({ demo }: { demo: CatalogItem[] }) {
 
   return <main id="contenu" tabIndex={-1} className="home-page">
     <section className="home-hero">
-      <div className="marquee" aria-hidden="true">
+      {!lightweight && <div className="marquee" aria-hidden="true">
         {rows.map((row, index) => row.length > 0 && <div className={`marquee-row marquee-${index}`} key={index}><div className="marquee-track">{[...row, ...row].map((item, position) => <Cover key={`${item.id}-${position}`} item={item} priority={position < 6} sizes="150px" />)}</div></div>)}
-      </div>
+      </div>}
       <div className="home-veil" aria-hidden="true" />
       <div className="home-hero-inner">
         <span className="eyebrow"><Sparkles size={14} aria-hidden="true" /> Votre vidéo-club personnel</span>

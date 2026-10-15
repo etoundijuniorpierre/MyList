@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, ArrowUp, Info, LoaderCircle, RotateCcw, Search, X } from 'lucide-react'
 import { Cover, formatPrice } from '../media'
@@ -7,6 +7,7 @@ import { categories, categoryLabel, type CatalogItem, type Category } from '../t
 import { useSite } from './context'
 import { DetailDialog } from './DetailDialog'
 import { MediaCard, SkeletonGrid } from './MediaCard'
+import { useLightweightDisplay } from '../useLightweightDisplay'
 
 type Sort = 'recent' | 'az' | 'za' | 'year-desc' | 'year-asc'
 const sortLabels: Record<Sort, string> = { recent: 'Ajouts récents', az: 'Titre A → Z', za: 'Titre Z → A', 'year-desc': 'Plus récents d’abord', 'year-asc': 'Plus anciens d’abord' }
@@ -27,8 +28,9 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
   const format = params.get('format') ?? ''
   const openId = params.get('titre')
   const [search, setSearch] = useState(q)
-  const deferred = useDeferredValue(search)
   const searchInput = useRef<HTMLInputElement>(null)
+  const committedSearch = useRef(q)
+  const lightweight = useLightweightDisplay()
   const listStart = useRef<HTMLDivElement>(null)
   const paginationContext = JSON.stringify([category, q, genre, year, sort, byYear, origin, format])
   const previousPagination = useRef({ context: paginationContext, page })
@@ -44,7 +46,10 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
   }, [paginationContext, page])
 
   useEffect(() => { setPageMeta(label) }, [label])
-  useEffect(() => { setSearch(q) }, [q])
+  useEffect(() => {
+    if (q !== committedSearch.current) setSearch(q)
+    committedSearch.current = q
+  }, [q])
   const update = useCallback((changes: Record<string, string | null>, replace = true) => {
     setParams(current => {
       const next = new URLSearchParams(current)
@@ -53,7 +58,14 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
       return next
     }, { replace })
   }, [setParams])
-  useEffect(() => { if (deferred !== q) update({ q: deferred.trim() || null }) }, [deferred, q, update])
+  useEffect(() => {
+    if (search.trim() === q) return
+    const timeout = window.setTimeout(() => {
+      committedSearch.current = search.trim()
+      update({ q: search.trim() || null })
+    }, 300)
+    return () => window.clearTimeout(timeout)
+  }, [search, q, update])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== '/' || (event.target as HTMLElement)?.closest('input, textarea, select, dialog')) return
@@ -72,7 +84,7 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
   const navigateItem = useCallback((item: CatalogItem) => update({ titre: item.id }), [update])
   const closeItem = useCallback(() => update({ titre: null }), [update])
   const edit = useCallback((item: CatalogItem) => navigate(`/admin?edit=${encodeURIComponent(item.id)}`), [navigate])
-  const wall = useMemo(() => pageItems.filter(item => item.poster_url).slice(0, 14), [pageItems])
+  const wall = useMemo(() => lightweight ? [] : pageItems.filter(item => item.poster_url).slice(0, 14), [pageItems, lightweight])
   const priceHint = pricingHint(category, prices, gameTiers, gameDiscount)
   const yearGroups = byYear ? [...new Set(pageItems.map(item => item.year))] : []
 

@@ -15,7 +15,7 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
   const [revision, setRevision] = useState(0)
   const [browse, setBrowse] = useState<CatalogBrowseResult>({ items: [], total: 0, summary: { count: 0, seasons: 0, size: 0, genres: 0 }, years: [], genres: [] })
   const [browseLoading, setBrowseLoading] = useState(false)
-  const browseCache = useRef(new Map<string, CatalogBrowseResult>())
+  const browseCache = useRef(new Map<string, { result: CatalogBrowseResult; expiresAt: number }>())
   const generation = useRef(0)
   const lastAdmin = useRef(isAdmin)
   const complete = useRef(new Set<string>())
@@ -112,9 +112,21 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
   useEffect(() => {
     if (!scope || scope === 'all') return
     let cancelled = false
+    const controller = new AbortController()
     const version = generation.current
     const cached = browseCache.current.get(currentBrowseKey)
-    if (cached) setBrowse(cached)
+    function display(result: CatalogBrowseResult) {
+      setBrowse(result)
+      setItems(current => [...new Map([...current.filter(item => complete.current.has('all') || !(item.active && item.category === scope) || selectionRef.current.includes(item.id)), ...result.items].map(item => [item.id, item])).values()])
+    }
+    if (cached) {
+      display(cached.result)
+      if (cached.expiresAt > Date.now()) {
+        setBrowseLoading(false)
+        setErrors(current => { const next = { ...current }; delete next[scope]; return next })
+        return
+      }
+    }
     setBrowseLoading(true)
     setErrors(current => { const next = { ...current }; delete next[scope]; return next })
     void (async () => {
@@ -128,23 +140,22 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
             p_genre: pageQuery.genre || null, p_year: Number.isInteger(year) ? year : null,
             p_year_unknown: pageQuery.year === 'inconnue', p_origin: pageQuery.origin || null,
             p_format: pageQuery.format || null, p_sort: pageQuery.sort, p_by_year: pageQuery.byYear,
-          })
+          }).abortSignal(controller.signal)
           if (error) throw error
           result = data as CatalogBrowseResult
         }
         if (cancelled || generation.current !== version) return
         browseCache.current.delete(currentBrowseKey)
-        browseCache.current.set(currentBrowseKey, result)
+        browseCache.current.set(currentBrowseKey, { result, expiresAt: Date.now() + 60_000 })
         if (browseCache.current.size > 20) browseCache.current.delete(browseCache.current.keys().next().value!)
-        setBrowse(result)
-        setItems(current => [...new Map([...current.filter(item => !(item.active && item.category === scope) || selectionRef.current.includes(item.id)), ...result.items].map(item => [item.id, item])).values()])
+        display(result)
       } catch (error) {
         if (!cancelled && generation.current === version) setErrors(current => ({ ...current, [scope]: error instanceof Error ? error.message : 'Chargement impossible.' }))
       } finally {
         if (!cancelled && generation.current === version) setBrowseLoading(false)
       }
     })()
-    return () => { cancelled = true }
+    return () => { cancelled = true; controller.abort() }
   }, [scope, isAdmin, revision, page, pageQuery.query, pageQuery.genre, pageQuery.year, pageQuery.origin, pageQuery.format, pageQuery.sort, pageQuery.byYear, currentBrowseKey])
 
   const error = scope ? errors[scope] ?? '' : ''

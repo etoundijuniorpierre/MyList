@@ -50,3 +50,50 @@ test('les chemins, ports, URL externes et largeurs non autorisés sont rejetés 
     assert.equal(calls, 0)
   } finally { global.fetch = originalFetch }
 })
+
+test('les miniatures mobiles de 240 px partagent une préparation et réutilisent le résultat', async () => {
+  const originalFetch = global.fetch
+  const input = await sharp({ create: { width: 900, height: 1200, channels: 3, background: '#829e4b' } }).jpeg().toBuffer()
+  let calls = 0
+  global.fetch = async () => {
+    calls++
+    return new Response(input, { status: 200, headers: { 'Content-Length': String(input.length) } })
+  }
+  const request = { method: 'GET', url: `/api/poster?path=aa/${'a'.repeat(64)}&w=240`, headers: { accept: 'image/webp' } }
+  try {
+    const first = response()
+    const second = response()
+    await Promise.all([handler(request, first), handler(request, second)])
+    const third = response()
+    await handler(request, third)
+    assert.equal(calls, 1)
+    assert.equal(first.statusCode, 200)
+    assert.deepEqual(first.body, second.body)
+    assert.deepEqual(first.body, third.body)
+    const details = await sharp(first.body).metadata()
+    assert.equal(details.width, 240)
+    assert.equal(details.height, 320)
+    assert.equal(details.format, 'webp')
+    const avif = response()
+    await handler({ ...request, headers: { accept: 'image/avif' } }, avif)
+    assert.equal(calls, 2)
+    assert.equal(avif.headers['content-type'], 'image/avif')
+  } finally { global.fetch = originalFetch }
+})
+
+test('un échec de miniature est réessayé et n’empoisonne pas le cache', async () => {
+  const originalFetch = global.fetch
+  const input = await sharp({ create: { width: 120, height: 180, channels: 3, background: '#624baa' } }).jpeg().toBuffer()
+  let calls = 0
+  global.fetch = async () => ++calls === 1 ? new Response(null, { status: 503 }) : new Response(input, { status: 200 })
+  const request = { method: 'GET', url: `/api/poster?path=bb/${'b'.repeat(64)}&w=240`, headers: {} }
+  try {
+    const failure = response()
+    await handler(request, failure)
+    assert.equal(failure.statusCode, 404)
+    const retry = response()
+    await handler(request, retry)
+    assert.equal(retry.statusCode, 200)
+    assert.equal(calls, 2)
+  } finally { global.fetch = originalFetch }
+})

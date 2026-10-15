@@ -1,36 +1,69 @@
 import type { CatalogItem, GameCountDiscount, GamePriceTier, PriceRule } from './types'
 
-export function itemPrice(item: CatalogItem, selection: CatalogItem[], rules: PriceRule[], gameTiers: GamePriceTier[], gameDiscount: GameCountDiscount): { amount: number; currency: string; detail: string } | null {
+export interface ItemPricing { amount: number; currency: string; detail: string }
+
+function positiveAmount(value: unknown): number | null {
+  if (typeof value !== 'number' && typeof value !== 'string') return null
+  if (typeof value === 'string' && !value.trim()) return null
+  const amount = Math.round(Number(value) * 100) / 100
+  return Number.isFinite(amount) && amount > 0 ? amount : null
+}
+
+function validDiscount(discount: GameCountDiscount) {
+  const amount = positiveAmount(discount.price_per_game)
+  return Number.isInteger(discount.min_games) && discount.min_games! >= 2 && amount !== null && discount.currency
+    ? { amount, currency: discount.currency, count: discount.min_games! } : null
+}
+
+export function itemPrice(item: CatalogItem, selection: CatalogItem[], rules: PriceRule[], gameTiers: GamePriceTier[], gameDiscount: GameCountDiscount): ItemPricing | null {
   if (item.category === 'games') {
     const gameCount = selection.filter((entry) => entry.category === 'games').length
-    if (gameDiscount.min_games != null && gameDiscount.price_per_game != null && gameDiscount.currency && gameCount >= gameDiscount.min_games) {
-      return { amount: Number(gameDiscount.price_per_game), currency: gameDiscount.currency, detail: `Tarif dès ${gameDiscount.min_games} jeux` }
+    const discount = validDiscount(gameDiscount)
+    if (discount && gameCount >= discount.count) {
+      return { amount: discount.amount, currency: discount.currency, detail: `Tarif dès ${discount.count} jeux` }
     }
     const size = Number(item.game_size_gb)
     if (!Number.isFinite(size) || size <= 0) return null
     const billableGb = Math.ceil(size)
     const tier = gameTiers.find((entry) => billableGb >= entry.min_gb && billableGb <= entry.max_gb)
-    return tier ? { amount: Number(tier.price), currency: tier.currency, detail: `${size.toLocaleString('fr-FR')} Go` } : null
+    const amount = positiveAmount(tier?.price)
+    return tier?.currency && amount !== null ? { amount, currency: tier.currency, detail: `${size.toLocaleString('fr-FR')} Go` } : null
   }
   const category = item.category
   const priceCategory = category === 'anime' && item.media_format === 'film' ? 'anime-film' : category
   const rule = rules.find((entry) => entry.category === priceCategory)
-  if (!rule?.currency || rule.standard_price == null) return null
-  if (priceCategory === 'anime-film') return { amount: Number(rule.standard_price), currency: rule.currency, detail: `1 film × ${Number(rule.standard_price)}` }
+  const standard = positiveAmount(rule?.standard_price)
+  if (!rule?.currency || standard === null) return null
+  if (priceCategory === 'anime-film') return { amount: standard, currency: rule.currency, detail: `1 film × ${standard}` }
   const seasons = Number(item.seasons_count)
   if (!Number.isInteger(seasons) || seasons < 1) return null
   const totalSeasons = selection.filter((entry) => category === 'series' || category === 'anime'
     ? entry.category === 'series' || (entry.category === 'anime' && entry.media_format !== 'film')
     : entry.category === category).reduce((sum, entry) => sum + (Number(entry.seasons_count) || 0), 0)
-  const unit = rule.threshold_seasons != null && totalSeasons >= rule.threshold_seasons && rule.threshold_price != null
-    ? Number(rule.threshold_price) : Number(rule.standard_price)
-  return { amount: unit * seasons, currency: rule.currency, detail: `${seasons} saison${seasons > 1 ? 's' : ''} × ${unit}` }
+  const reduced = positiveAmount(rule.threshold_price)
+  const unit = rule.threshold_seasons != null && rule.threshold_seasons >= 2 && totalSeasons >= rule.threshold_seasons && reduced !== null
+    ? reduced : standard
+  return { amount: Math.round(unit * seasons * 100) / 100, currency: rule.currency, detail: `${seasons} saison${seasons > 1 ? 's' : ''} × ${unit}` }
+}
+
+/** Un même calcul alimente le panier, la barre de total et le message WhatsApp. */
+export function calculateCart(items: CatalogItem[], rules: PriceRule[], tiers: GamePriceTier[], discount: GameCountDiscount) {
+  const priced = items.map(item => ({ item, pricing: itemPrice(item, items, rules, tiers, discount), standard: standardItemPrice(item, rules, tiers) }))
+  const missingPrice = priced.some(entry => !entry.pricing)
+  const currencies = [...new Set(priced.flatMap(entry => entry.pricing ? [entry.pricing.currency] : []))]
+  const currency = currencies.length === 1 ? currencies[0] : null
+  const total = items.length && !missingPrice && currency
+    ? priced.reduce((sum, entry) => sum + Math.round(entry.pricing!.amount * 100), 0) / 100 : null
+  const standardTotal = items.length && priced.every(entry => entry.standard !== null)
+    ? priced.reduce((sum, entry) => sum + Math.round(entry.standard! * 100), 0) / 100 : null
+  const savings = total !== null && standardTotal !== null ? Math.max(0, Math.round((standardTotal - total) * 100) / 100) : 0
+  return { priced, missingPrice, currencies, currency, total, standardTotal, savings }
 }
 
 export function validateGameTiers(tiers: GamePriceTier[]): string | null {
   const sorted = [...tiers].sort((a, b) => a.min_gb - b.min_gb)
   for (const [index, tier] of sorted.entries()) {
-    if (!Number.isInteger(tier.min_gb) || !Number.isInteger(tier.max_gb) || tier.min_gb < 1 || tier.max_gb < tier.min_gb || !Number.isFinite(tier.price) || tier.price < 0) return 'Chaque palier doit avoir des bornes entières valides et un prix positif.'
+    if (!Number.isInteger(tier.min_gb) || !Number.isInteger(tier.max_gb) || tier.min_gb < 1 || tier.max_gb < tier.min_gb || positiveAmount(tier.price) === null) return 'Chaque palier doit avoir des bornes entières valides et un prix strictement supérieur à zéro.'
     if (index > 0 && tier.min_gb <= sorted[index - 1].max_gb) return 'Les paliers de jeux ne doivent pas se chevaucher.'
   }
   return null
@@ -41,13 +74,14 @@ export function standardItemPrice(item: CatalogItem, rules: PriceRule[], gameTie
   if (item.category === 'games') {
     const size = Math.ceil(Number(item.game_size_gb))
     const tier = gameTiers.find((entry) => size >= entry.min_gb && size <= entry.max_gb)
-    return tier ? Number(tier.price) : null
+    return tier?.currency ? positiveAmount(tier.price) : null
   }
   const rule = rules.find((entry) => entry.category === (item.category === 'anime' && item.media_format === 'film' ? 'anime-film' : item.category))
-  if (rule?.standard_price == null) return null
-  if (item.media_format === 'film') return Number(rule.standard_price)
+  const amount = positiveAmount(rule?.standard_price)
+  if (!rule?.currency || amount === null) return null
+  if (item.media_format === 'film') return amount
   const seasons = Number(item.seasons_count)
-  return Number.isInteger(seasons) && seasons > 0 ? Number(rule.standard_price) * seasons : null
+  return Number.isInteger(seasons) && seasons > 0 ? Math.round(amount * seasons * 100) / 100 : null
 }
 
 export interface DiscountProgress {
@@ -84,8 +118,9 @@ export function discountProgress(selection: CatalogItem[], rules: PriceRule[], g
     }
   }
   const games = selection.filter((item) => item.category === 'games').length
-  if (games && gameDiscount.min_games && gameDiscount.price_per_game != null && gameDiscount.currency) {
-    progress.push({ key: 'games', label: 'Jeux PC', current: games, target: gameDiscount.min_games, unit: 'jeu', reached: games >= gameDiscount.min_games, reward: `${format(Number(gameDiscount.price_per_game), gameDiscount.currency)} le jeu` })
+  const discount = validDiscount(gameDiscount)
+  if (games && discount) {
+    progress.push({ key: 'games', label: 'Jeux PC', current: games, target: discount.count, unit: 'jeu', reached: games >= discount.count, reward: `${format(discount.amount, discount.currency)} le jeu` })
   }
   return progress
 }

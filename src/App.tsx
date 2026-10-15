@@ -2,14 +2,14 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowRight, Check, Heart, LoaderCircle, LockKeyhole, LogOut, Menu, Search, ShieldCheck, Sparkles, Timer, X } from 'lucide-react'
 import type { User } from '@supabase/supabase-js'
-import { itemPrice } from './pricing'
+import { calculateCart } from './pricing'
 import { isConfigured, supabase } from './supabase'
 import { formatPrice } from './media'
 import { useCatalog } from './useCatalog'
 import { useIdleLogout, readIdleMinutes } from './useIdleLogout'
 import { POSTER_JOB_KEY, readPosterJob, savePosterJob, type PosterJob } from './posterJobState'
 import { categoryMeta, plural } from './display'
-import { categories, titleKey, type CatalogItem, type Category, type GameCountDiscount, type GamePriceTier, type PriceRule, type SiteSettings } from './types'
+import { categories, titleKey, type CatalogItem, type Category, type GameCountDiscount, type GamePriceTier, type PriceRule, type PricingSettings, type SiteSettings } from './types'
 import { SiteContext, type SiteState, type Toast } from './site/context'
 import { HomePage } from './site/HomePage'
 import { CatalogPage } from './site/CatalogPage'
@@ -58,8 +58,8 @@ function App() {
   const navigate = useNavigate()
   const { items, browseItems, browseTotal, browseSummary, browseYears, browseGenres, browsePage, browsePageSize, loading, error: catalogError, refresh: reloadCatalog, cartPending, missing } = useCatalog(location.pathname, location.search, isAdmin, selection, demoItems)
 
-  async function refreshSettings() {
-    if (!supabase) return
+  async function refreshSettings(): Promise<PricingSettings | null> {
+    if (!supabase) return { prices, gameTiers, gameDiscount, settings }
     setSettingsLoading(true)
     const [pricesResult, tiersResult, discountResult, settingsResult] = await Promise.all([
       supabase.from('price_rules').select('category,standard_price,threshold_seasons,threshold_price,currency'),
@@ -73,6 +73,8 @@ function App() {
     if (discountResult.data) setGameDiscount(discountResult.data as GameCountDiscount)
     if (settingsResult.data) setSettings(settingsResult.data as SiteSettings)
     setSettingsLoading(false)
+    if (pricesResult.error || tiersResult.error || discountResult.error || settingsResult.error || !pricesResult.data || !tiersResult.data || !discountResult.data || !settingsResult.data) return null
+    return { prices: pricesResult.data as PriceRule[], gameTiers: tiersResult.data as GamePriceTier[], gameDiscount: discountResult.data as GameCountDiscount, settings: settingsResult.data as SiteSettings }
   }
 
   async function refreshCatalog() { await Promise.all([reloadCatalog(), refreshSettings()]) }
@@ -204,11 +206,10 @@ function App() {
   const activeItems = useMemo(() => items.filter((item) => item.active), [items])
   const selectedItems = useMemo(() => selection.map((id) => activeItems.find((item) => item.id === id)).filter((item): item is CatalogItem => Boolean(item)), [selection, activeItems])
   const cartTotal = useMemo(() => {
-    if (!selectedItems.length || selectedItems.length !== selection.length) return null
-    const priced = selectedItems.map(item => itemPrice(item, selectedItems, prices, gameTiers, gameDiscount))
-    const currency = priced[0]?.currency
-    return priced.every(entry => entry && entry.currency === currency) ? { amount: priced.reduce((sum, entry) => sum + entry!.amount, 0), currency: currency! } : null
-  }, [selectedItems, selection.length, prices, gameTiers, gameDiscount])
+    if (!selectedItems.length || selectedItems.length !== selection.length || settingsLoading || loadError) return null
+    const cart = calculateCart(selectedItems, prices, gameTiers, gameDiscount)
+    return cart.total !== null && cart.currency ? { amount: cart.total, currency: cart.currency } : null
+  }, [selectedItems, selection.length, prices, gameTiers, gameDiscount, settingsLoading, loadError])
 
   const site: SiteState = {
     items, selection, selectedItems, toggle, clearSelection: () => setSelection([]),
@@ -255,7 +256,7 @@ function App() {
         <Route path="/" element={<HomePage demo={demoItems} />} />
         {categories.map((category) => <Route key={category.key} path={categoryMeta[category.key].route} element={<CatalogPage category={category.key} loading={loading} items={browseItems} total={browseTotal} summary={browseSummary} years={browseYears} genres={browseGenres} page={browsePage} pageSize={browsePageSize} />} />)}
         <Route path="/animes-mangas" element={<Navigate to="/animes" replace />} />
-        <Route path="/selection" element={<SelectionPage loading={cartPending || settingsLoading} />} />
+        <Route path="/selection" element={<SelectionPage loading={cartPending || settingsLoading} pricingError={loadError} onVerifyPricing={refreshSettings} />} />
         <Route path="/connexion" element={<AuthPage isAdmin={isAdmin} adminReady={adminReady} />} />
         <Route path="/admin" element={<AdminPage catalogLoading={loading || settingsLoading} user={user} isAdmin={isAdmin} authReady={authReady && adminReady} items={items} prices={prices} gameTiers={gameTiers} gameDiscount={gameDiscount} settings={settings} onChanged={refreshCatalog} onMerged={remapSelection} posterJobRunning={posterJobRunning} onRunPosterJob={runPosterJob} idleMinutes={idleMinutes} onIdleMinutes={setIdleMinutes} onSignOut={signOut} />} />
         <Route path="*" element={<NotFound />} />

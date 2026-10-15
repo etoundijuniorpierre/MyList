@@ -335,12 +335,12 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
     if (hasPrice && !/^[A-Z]{3}$/.test(code)) { setMessage('Indiquez un code devise de 3 lettres, par exemple EUR ou XOF.'); return }
     const tierError = validateGameTiers(tierInputs)
     if (tierError) { setMessage(tierError); return }
-    if ((discountCount === '') !== (discountPrice === '') || (discountCount !== '' && (!Number.isInteger(Number(discountCount)) || Number(discountCount) < 2 || !Number.isFinite(Number(discountPrice)) || Number(discountPrice) < 0))) { setMessage('La remise jeux exige un nombre entier d’au moins 2 jeux et un prix par jeu valide.'); return }
+    if ((discountCount === '') !== (discountPrice === '') || (discountCount !== '' && (!Number.isInteger(Number(discountCount)) || Number(discountCount) < 2 || !Number.isFinite(Number(discountPrice)) || Number(discountPrice) <= 0))) { setMessage('La remise jeux exige un nombre entier d’au moins 2 jeux et un prix par jeu strictement supérieur à zéro.'); return }
     for (const [category, entry] of Object.entries(priceInputs) as [PriceRule['category'], (typeof priceInputs)[PriceRule['category']]][]) {
-      if (entry.standard !== '' && (Number(entry.standard) < 0 || !Number.isFinite(Number(entry.standard)))) { setMessage('Les prix doivent être positifs.'); return }
+      if (entry.standard !== '' && (Number(entry.standard) <= 0 || !Number.isFinite(Number(entry.standard)))) { setMessage('Les prix doivent être strictement supérieurs à zéro.'); return }
       if (category === 'anime-film') continue
       if (((entry.threshold === '') !== (entry.reduced === ''))) { setMessage('Renseignez le seuil de saisons et son prix ensemble.'); return }
-      if (entry.threshold !== '' && (!Number.isInteger(Number(entry.threshold)) || Number(entry.threshold) < 2 || Number(entry.reduced) < 0 || entry.standard === '')) { setMessage('Le palier saisons doit commencer à 2 saisons et avoir un prix valide.'); return }
+      if (entry.threshold !== '' && (!Number.isInteger(Number(entry.threshold)) || Number(entry.threshold) < 2 || !Number.isFinite(Number(entry.reduced)) || Number(entry.reduced) <= 0 || entry.standard === '')) { setMessage('Le palier saisons doit commencer à 2 saisons et avoir un prix strictement supérieur à zéro.'); return }
       if (entry.reduced !== '' && Number(entry.reduced) > Number(entry.standard)) { setMessage('Le prix réduit par saison ne peut pas dépasser le prix standard.'); return }
     }
     setBusy(true); setMessage('')

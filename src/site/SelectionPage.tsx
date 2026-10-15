@@ -2,44 +2,57 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowRight, Check, Copy, Heart, LoaderCircle, Send, Trash2, TrendingDown } from 'lucide-react'
 import { Cover, formatPrice } from '../media'
-import { discountProgress, itemPrice, standardItemPrice } from '../pricing'
+import { calculateCart, discountProgress } from '../pricing'
+import { buildCartMessage } from '../cartMessage'
 import { categoryMeta, kindLabel, measureLabel, plural, setPageMeta } from '../display'
-import { categories } from '../types'
+import { categories, type PricingSettings } from '../types'
 import { useSite } from './context'
 
 const NAME_KEY = 'mylist-customer-name'
 
-export function SelectionPage({ loading }: { loading: boolean }) {
-  const { selectedItems: items, toggle, clearSelection, prices, gameTiers, gameDiscount, settings, notify } = useSite()
+export function SelectionPage({ loading, pricingError = '', onVerifyPricing }: { loading: boolean; pricingError?: string; onVerifyPricing: () => Promise<PricingSettings | null> }) {
+  const { selectedItems: items, selection, toggle, clearSelection, prices, gameTiers, gameDiscount, settings, notify } = useSite()
   const [name, setName] = useState(() => { try { return localStorage.getItem(NAME_KEY) ?? '' } catch { return '' } })
   const [confirmClear, setConfirmClear] = useState(false)
+  const [checking, setChecking] = useState(false)
   useEffect(() => { setPageMeta('Mon panier') }, [])
   useEffect(() => { try { localStorage.setItem(NAME_KEY, name) } catch { /* Le prénom reste facultatif. */ } }, [name])
-  const priced = items.map((item) => ({ item, pricing: itemPrice(item, items, prices, gameTiers, gameDiscount), standard: standardItemPrice(item, prices, gameTiers) }))
-  const missingPrice = priced.some(({ pricing }) => !pricing)
-  const currencies = [...new Set(priced.map(({ pricing }) => pricing?.currency).filter(Boolean))]
-  const currency = currencies.length === 1 ? currencies[0]! : null
-  const total = !missingPrice && currency ? priced.reduce((sum, { pricing }) => sum + (pricing?.amount ?? 0), 0) : null
-  const standardTotal = priced.every(({ standard }) => standard !== null) ? priced.reduce((sum, { standard }) => sum + (standard ?? 0), 0) : null
-  const savings = total !== null && standardTotal !== null && standardTotal > total ? standardTotal - total : 0
+  const cart = calculateCart(items, prices, gameTiers, gameDiscount)
+  const { priced, missingPrice, currencies, currency, savings } = cart
+  const incomplete = loading || Boolean(pricingError) || items.length !== selection.length
+  const total = incomplete ? null : cart.total
   const progress = discountProgress(items, prices, gameDiscount, formatPrice)
-  const canSend = Boolean(items.length && settings.whatsapp_number && total !== null)
+  const canExport = Boolean(items.length && !incomplete && !checking && total !== null && total > 0)
+  const canSend = canExport && Boolean(settings.whatsapp_number)
 
-  function message() {
-    const lines = categories.flatMap((category) => {
-      const entries = priced.filter(({ item }) => item.category === category.key)
-      return entries.length ? [`*${category.label.toUpperCase()}*`, ...entries.map(({ item, pricing }, index) => `${index + 1}. ${item.title}${item.media_type === 'chinese-drama' || item.media_type === 'korean-drama' || item.media_format === 'film' ? ` [${kindLabel(item)}]` : ''} (${pricing?.detail ?? measureLabel(item)})${pricing ? ` — ${formatPrice(pricing.amount, pricing.currency)}` : ''}`), ''] : []
-    })
-    const greeting = name.trim() ? `Bonjour, c’est ${name.trim()}. Je souhaite ce panier Ma Liste :` : 'Bonjour, je souhaite ce panier Ma Liste :'
-    return `${greeting}\n\n${lines.join('\n')}\n${total !== null && currency ? `*Total : ${formatPrice(total, currency)}*` : ''}${savings && currency ? `\n(remises incluses : −${formatPrice(savings, currency)})` : ''}\n\nMerci !`
+  async function confirmedMessage() {
+    setChecking(true)
+    try {
+      const latest = await onVerifyPricing()
+      if (!latest) throw new Error('Les tarifs sont momentanément indisponibles. Réessayez avant d’envoyer le panier.')
+      return { text: buildCartMessage(calculateCart(items, latest.prices, latest.gameTiers, latest.gameDiscount), name, formatPrice), number: latest.settings.whatsapp_number }
+    } finally { setChecking(false) }
   }
-  function send() {
+  async function send() {
     if (!canSend) return
-    window.open(`https://wa.me/${settings.whatsapp_number}?text=${encodeURIComponent(message())}`, '_blank', 'noopener,noreferrer')
+    // Ouvrir pendant le clic évite le blocage des fenêtres après la vérification réseau sur mobile.
+    const popup = window.open('about:blank', '_blank')
+    if (popup) popup.opener = null
+    try {
+      const verified = await confirmedMessage()
+      if (!verified.number) throw new Error('Le numéro WhatsApp n’est pas encore configuré.')
+      const url = `https://wa.me/${verified.number}?text=${encodeURIComponent(verified.text)}`
+      if (popup && !popup.closed) popup.location.replace(url)
+      else window.location.assign(url)
+    } catch (error) {
+      popup?.close()
+      notify(error instanceof Error ? error.message : 'Le panier n’a pas pu être vérifié. Réessayez.')
+    }
   }
   async function copy() {
-    try { await navigator.clipboard.writeText(message()); notify('Liste copiée dans le presse-papiers.') }
-    catch { notify('La copie est bloquée par le navigateur.') }
+    if (!canExport) return
+    try { const verified = await confirmedMessage(); await navigator.clipboard.writeText(verified.text); notify('Liste copiée dans le presse-papiers.') }
+    catch (error) { notify(error instanceof Error ? error.message : 'La copie est bloquée par le navigateur.') }
   }
 
   return <main id="contenu" tabIndex={-1} className="interior-page selection-page">
@@ -76,13 +89,14 @@ export function SelectionPage({ loading }: { loading: boolean }) {
           <h2 id="summary-title">Votre demande</h2>
           <div className="summary-line"><span>Titres</span><strong>{items.length}</strong></div>
           {savings > 0 && currency && <div className="summary-line summary-savings"><span>Remises de volume</span><strong>−{formatPrice(savings, currency)}</strong></div>}
-          <div className="summary-total"><span>Total estimé</span><strong>{total !== null && currency ? formatPrice(total, currency) : 'À définir'}</strong></div>
+          <div className="summary-total"><span>Total estimé</span><strong>{loading ? 'Calcul en cours…' : total !== null && currency ? formatPrice(total, currency) : 'À définir'}</strong></div>
           <label className="summary-name">Votre prénom <small>(facultatif)</small><input value={name} onChange={(event) => setName(event.target.value.slice(0, 40))} autoComplete="given-name" placeholder="Pour personnaliser le message" /></label>
           {missingPrice && <p className="notice">Le prix de certains titres n’est pas encore défini : l’envoi sera possible dès qu’il le sera.</p>}
+          {pricingError && <p className="notice" role="alert">Les tarifs n’ont pas pu être chargés. Actualisez le panier avant de l’envoyer.</p>}
           {currencies.length > 1 && <p className="notice">Les tarifs utilisent plusieurs devises : contactez-nous directement.</p>}
           {!settings.whatsapp_number && <p className="notice">Le numéro WhatsApp de réception n’est pas encore configuré.</p>}
-          <button type="button" className="button-whatsapp full" onClick={send} disabled={!canSend}><Send size={17} /> Envoyer sur WhatsApp</button>
-          <button type="button" className="button-ghost full" onClick={() => void copy()}><Copy size={16} /> Copier la liste</button>
+          <button type="button" className="button-whatsapp full" onClick={() => void send()} disabled={!canSend}><Send size={17} /> {checking ? 'Vérification des prix…' : 'Envoyer sur WhatsApp'}</button>
+          <button type="button" className="button-ghost full" onClick={() => void copy()} disabled={!canExport}><Copy size={16} /> Copier la liste</button>
           <p className="summary-footnote">WhatsApp s’ouvre avec votre liste et le total. Vous relisez le message avant de l’envoyer.</p>
         </aside>
       </div>}
