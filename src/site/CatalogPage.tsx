@@ -1,6 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, ArrowUp, Info, RotateCcw, Search, X } from 'lucide-react'
+import { ArrowRight, ArrowUp, Info, LoaderCircle, RotateCcw, Search, X } from 'lucide-react'
 import { Cover, formatPrice } from '../media'
 import { categoryMeta, plural, setPageMeta } from '../display'
 import { categories, categoryLabel, type CatalogItem, type Category } from '../types'
@@ -105,16 +105,17 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
 
     {priceHint && <p className="price-hint"><Info size={15} aria-hidden="true" /> {priceHint}</p>}
     <section className="catalog-results" aria-label={`Titres ${label}`}>
-      {loading ? <SkeletonGrid /> : total ? byYear
+      {loading && pageItems.length > 0 && <p className="catalog-refresh-status" role="status"><LoaderCircle className="spin" size={15} aria-hidden="true" /> Mise à jour des titres…</p>}
+      {loading && !pageItems.length ? <SkeletonGrid /> : total ? byYear
         ? yearGroups.map(value => { const group = pageItems.filter(item => item.year === value); return <section className="year-group" key={value ?? 'inconnue'}><h2>{value ?? 'Année inconnue'} <span>{plural(group.length, 'titre')}</span></h2><div className="card-grid">{group.map(item => <MediaCard key={item.id} item={item} selected={selection.includes(item.id)} onOpen={openItem} onToggle={toggle} onEdit={isAdmin ? edit : undefined} />)}</div></section> })
         : <div className="card-grid">{pageItems.map((item, index) => <MediaCard key={item.id} item={item} priority={index < 6} selected={selection.includes(item.id)} onOpen={openItem} onToggle={toggle} onEdit={isAdmin ? edit : undefined} />)}</div>
         : <div className="empty-state"><Search size={28} aria-hidden="true" /><h2>{summary.count ? 'Aucun titre ne correspond' : 'Cet univers arrive bientôt'}</h2><p>{summary.count ? 'Essayez un autre mot ou retirez un filtre.' : 'Les premiers titres seront bientôt ajoutés.'}</p>{active && <button type="button" className="button-ghost" onClick={() => { setSearch(''); setParams(openId ? { titre: openId } : {}, { replace: true }) }}>Voir tout le catalogue</button>}</div>}
-      {!loading && total > pageSize && <nav className="catalog-pagination" aria-label="Pagination du catalogue">
+      {total > pageSize && <nav className="catalog-pagination" aria-label="Pagination du catalogue">
         <button type="button" className="button-ghost pagination-step" disabled={page <= 1} onClick={() => changePage(page - 1, setParams)} aria-label="Page précédente">Précédent</button>
         <div className="pagination-pages">{pageNumbers.map((entry, index) => entry === '…' ? <span className="pagination-ellipsis" key={`ellipsis-${index}`} aria-hidden="true">…</span> : <button type="button" key={entry} className={`pagination-number ${entry === page ? 'is-current' : ''}`} aria-label={`Page ${entry}`} aria-current={entry === page ? 'page' : undefined} onClick={() => changePage(entry, setParams)}>{entry}</button>)}</div>
         <button type="button" className="button-ghost pagination-step" disabled={page >= pageCount} onClick={() => changePage(page + 1, setParams)} aria-label="Page suivante">Suivant</button>
       </nav>}
-      {!loading && page > 1 && <button type="button" className="back-to-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Revenir en haut"><ArrowUp size={18} /></button>}
+      {page > 1 && <button type="button" className="back-to-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Revenir en haut"><ArrowUp size={18} /></button>}
     </section>
 
     <section className="other-universes" aria-labelledby="other-title"><h2 id="other-title">Changer d’univers</h2><div className="universe-links">{categories.filter(entry => entry.key !== category).map(entry => <Link key={entry.key} to={categoryMeta[entry.key].route} style={{ '--accent': categoryMeta[entry.key].accent } as CSSProperties}><span>{entry.label}</span><small>{categoryMeta[entry.key].tagline}</small><ArrowRight size={17} aria-hidden="true" /></Link>)}</div></section>
@@ -124,7 +125,6 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
 
 function changePage(page: number, setParams: SearchParamsSetter) {
   setParams(current => { const next = new URLSearchParams(current); if (page <= 1) next.delete('page'); else next.set('page', String(page)); return next }, { replace: false })
-  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
 function paginationWindow(page: number, pages: number): Array<number | '…'> {

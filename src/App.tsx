@@ -176,10 +176,6 @@ function App() {
   useEffect(() => { if (missing.size) setSelection(current => current.filter(id => !missing.has(id))) }, [missing])
   useEffect(() => { setMenuOpen(false); setSearchOpen(false) }, [location.pathname])
   useEffect(() => {
-    if (location.hash || location.search.includes('titre=')) return
-    window.scrollTo({ top: 0 })
-  }, [location.pathname])
-  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearchOpen(true) }
     }

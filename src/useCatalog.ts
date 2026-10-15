@@ -15,6 +15,7 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
   const [revision, setRevision] = useState(0)
   const [browse, setBrowse] = useState<CatalogBrowseResult>({ items: [], total: 0, summary: { count: 0, seasons: 0, size: 0, genres: 0 }, years: [], genres: [] })
   const [browseLoading, setBrowseLoading] = useState(false)
+  const browseCache = useRef(new Map<string, CatalogBrowseResult>())
   const generation = useRef(0)
   const lastAdmin = useRef(isAdmin)
   const complete = useRef(new Set<string>())
@@ -32,10 +33,12 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
     format: ['series', 'film'].includes(params.get('format') ?? '') ? params.get('format')! : '',
     sort: ['recent', 'az', 'za', 'year-desc', 'year-asc'].includes(requestedSort) ? requestedSort : 'recent', byYear: params.get('vue') === 'annees',
   }
+  const currentBrowseKey = JSON.stringify([scope, pageQuery.page, pageQuery.query, pageQuery.genre, pageQuery.year, pageQuery.origin, pageQuery.format, pageQuery.sort, pageQuery.byYear])
 
   function reset() {
     generation.current++
     complete.current.clear(); inFlight.current.clear(); requested.current.clear()
+    browseCache.current.clear()
     setItems(supabase ? [] : demo); setReady(new Set()); setErrors({}); setMissing(new Set())
     setRevision(value => value + 1)
   }
@@ -110,6 +113,8 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
     if (!scope || scope === 'all') return
     let cancelled = false
     const version = generation.current
+    const cached = browseCache.current.get(currentBrowseKey)
+    if (cached) setBrowse(cached)
     setBrowseLoading(true)
     setErrors(current => { const next = { ...current }; delete next[scope]; return next })
     void (async () => {
@@ -128,6 +133,9 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
           result = data as CatalogBrowseResult
         }
         if (cancelled || generation.current !== version) return
+        browseCache.current.delete(currentBrowseKey)
+        browseCache.current.set(currentBrowseKey, result)
+        if (browseCache.current.size > 20) browseCache.current.delete(browseCache.current.keys().next().value!)
         setBrowse(result)
         setItems(current => [...new Map([...current.filter(item => !(item.active && item.category === scope) || selectionRef.current.includes(item.id)), ...result.items].map(item => [item.id, item])).values()])
       } catch (error) {
@@ -137,7 +145,7 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
       }
     })()
     return () => { cancelled = true }
-  }, [scope, isAdmin, revision, page, pageQuery.query, pageQuery.genre, pageQuery.year, pageQuery.origin, pageQuery.format, pageQuery.sort, pageQuery.byYear])
+  }, [scope, isAdmin, revision, page, pageQuery.query, pageQuery.genre, pageQuery.year, pageQuery.origin, pageQuery.format, pageQuery.sort, pageQuery.byYear, currentBrowseKey])
 
   const error = scope ? errors[scope] ?? '' : ''
   const loading = Boolean(supabase && scope && (scope === 'all' ? !ready.has(scope) && !ready.has('all') : browseLoading) && !error)

@@ -129,17 +129,25 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
       game_size_gb: input.category === 'games' ? input.game_size_gb : null,
     }
     if (!clean.title || isCatalogNoiseTitle(clean.title)) throw new Error('Le nom du dossier ne correspond pas à un titre exploitable.')
-    const duplicate = items.find((item) => item.id !== id && (sameCatalogTitle(item, clean) || (clean.source_id && item.category === clean.category && item.source === clean.source && item.source_id === clean.source_id)))
-    const target = id ?? duplicate?.id
+    // Les index uniques de la base sont globaux, y compris entre catégories.
+    // Chercher la fiche propriétaire avant d'écrire évite de transformer le conflit SQL en message opaque.
+    const duplicate = items.find((item) => item.id !== id && (
+      item.title_key === clean.title_key || sameCatalogTitle(item, clean) ||
+      (clean.source_id && item.source === clean.source && item.source_id === clean.source_id)
+    ))
+    // En mode remplacement, conserver la fiche déjà propriétaire de la correspondance et
+    // fusionner l'ancienne fiche dedans. L'ancien code ciblait toujours `id`, puis supprimait
+    // ce même id : il pouvait donc échouer sur l'index unique ou effacer la fiche mise à jour.
+    const target = duplicate?.id ?? id
     const existing = items.find((item) => item.id === target)
     const edited = id ? items.find((item) => item.id === id) : undefined
     const payload = { ...mergeCatalogUpdate(clean, existing, id && duplicate ? edited : undefined),
-      title: id && duplicate ? duplicate.title : !id && existing ? existing.title : clean.title,
+      title: duplicate ? duplicate.title : existing ? existing.title : clean.title,
       title_key: existing?.title_key ?? clean.title_key,
     }
     const response = target ? await supabase.from('catalog_items').update(payload).eq('id', target).select('id').single() : await supabase.from('catalog_items').insert(payload).select('id').single()
-    if (response.error) throw response.error
-    if (id && duplicate) {
+    if (response.error) throw new Error(saveErrorMessage(response.error))
+    if (id && duplicate && duplicate.id !== id) {
       const removed = await supabase.from('catalog_items').delete().eq('id', id).select('id').maybeSingle()
       if (removed.error || !removed.data) {
         await onChanged()
@@ -438,6 +446,14 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
     {tab === 'settings' && <section className="admin-panel"><div className="admin-panel-head"><div><h2>Réception WhatsApp</h2><p>Ce numéro recevra les paniers envoyés par les visiteurs. Vous pouvez le modifier ici à tout moment.</p></div></div><form onSubmit={saveSettings} className="price-form"><label>Numéro international<input type="tel" inputMode="tel" autoComplete="tel" value={whatsappInput} onChange={(event) => setWhatsappInput(event.target.value)} placeholder="+2348012345678" maxLength={16} /></label><p className="scan-help">Incluez l’indicatif du pays. Aucun message ne sera envoyé tant que le numéro est vide.</p><button className="button-primary" disabled={busy}>Enregistrer le numéro <Check size={17} /></button></form></section>}
     </div>
   </main>
+}
+
+function saveErrorMessage(error: unknown): string {
+  const issue = error as { code?: string; message?: string; details?: string; hint?: string }
+  const reason = [issue?.message, issue?.details, issue?.hint].filter(Boolean).join(' — ')
+  if (issue?.code === '23505') return `Cette fiche entre en conflit avec un titre ou une correspondance déjà enregistrée. Détail Supabase : ${reason || 'contrainte unique'}`
+  if (issue?.code === '42501' || issue?.code === 'PGRST301') return `Supabase a refusé la modification pour cette session. Vérifiez les droits administrateur. ${reason}`.trim()
+  return reason ? `Enregistrement impossible : ${reason}` : 'Enregistrement impossible. Supabase n’a pas fourni de détail exploitable.'
 }
 
 function ManualForm({ initial, category, prices, gameTiers, gameDiscount, busy, onSave, onCancel }: { initial: ItemInput | null; category: Category; prices: PriceRule[]; gameTiers: GamePriceTier[]; gameDiscount: GameCountDiscount; busy: boolean; onSave: (input: ItemInput) => Promise<void>; onCancel: () => void }) {

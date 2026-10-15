@@ -223,6 +223,7 @@ kbd { font-family: var(--body); font-size: 10px; font-weight: 700; color: var(--
 .price-hint { display: flex; align-items: center; gap: 9px; max-width: 1440px; margin: 18px auto 0; padding: 0 var(--gutter); color: var(--muted); font-size: 13px; }
 .price-hint svg { color: var(--accent); flex: none; }
 .catalog-results { max-width: 1440px; margin: 0 auto; padding: 24px var(--gutter) 30px; position: relative; }
+.catalog-refresh-status { display: flex; align-items: center; gap: 8px; width: fit-content; margin: 0 0 12px; color: var(--dim); font-size: 12px; }
 .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(190px, 42vw), 1fr)); gap: 18px; }
 
 /* ——— Carte titre ——— */
