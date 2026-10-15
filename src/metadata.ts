@@ -5,6 +5,7 @@ import { isExactTitle } from './titleMatch'
 import { cleanTitle } from './folderScan'
 import { supabase } from './supabase'
 import { mergeMetadataResults } from './metadataMerge'
+import { buildCandidates, pickCandidate, variantsWithKind, type Candidate } from './metadataMatch'
 
 type TvShow = { show: { id: number; name: string; summary: string | null; premiered: string | null; genres: string[]; image: { medium: string; original: string } | null; url: string } }
 type AnimeSearch = { data: { mal_id: number; title: string; title_english?: string | null; title_synonyms?: string[]; type?: string | null; synopsis: string | null; year?: number | null; aired?: { from: string | null }; genres: { name: string }[]; images?: { jpg?: { large_image_url?: string; image_url?: string } }; url: string }[] }
@@ -87,6 +88,7 @@ async function kitsu(query: string): Promise<MetadataResult[]> {
     synopsis: plainText(anime.synopsis), poster_url: anime.poster_url, genres: [], year: anime.year,
     source: 'kitsu', source_id: anime.id, source_url: `https://kitsu.io/anime/${anime.id}`,
     active: true, seasons_count: null, game_size_gb: null,
+    aliases: anime.aliases,
     match: anime.aliases.some((title) => isExactTitle(title, query)) ? 'exact' : 'approximate',
   }))
 }
@@ -178,6 +180,7 @@ async function jikan(query: string): Promise<MetadataResult[]> {
       year: anime.year ?? (anime.aired?.from ? Number(anime.aired.from.slice(0, 4)) : null),
       source: 'jikan-anime', source_id: String(anime.mal_id), source_url: anime.url,
       active: true, seasons_count: null, game_size_gb: null,
+      aliases: [anime.title, anime.title_english, ...(anime.title_synonyms ?? [])].filter((title): title is string => Boolean(title)),
       match: [anime.title, anime.title_english, ...(anime.title_synonyms ?? [])].some((title) => title && isExactTitle(title, query)) ? 'exact' : 'approximate',
     }))
     if (matches.some((item) => item.match === 'exact') || index === queries.length - 1) return matches
@@ -192,6 +195,7 @@ async function anilist(query: string): Promise<MetadataResult[]> {
     synopsis: plainText(anime.synopsis), poster_url: anime.poster_url, genres: anime.genres ?? [], year: anime.year,
     source: 'anilist', source_id: anime.id, source_url: `https://anilist.co/anime/${anime.id}`,
     active: true, seasons_count: null, game_size_gb: null,
+    aliases: anime.aliases,
     match: anime.aliases.some((title) => isExactTitle(title, query)) ? 'exact' : 'approximate',
   }))
 }
@@ -224,6 +228,7 @@ async function tvdb(query: string, category: 'series' | 'novelas' | 'dramas' | '
       source: 'tvdb', source_id: show.id, source_url: `https://www.thetvdb.com/dereferrer/series/${show.id}`,
       active: true, seasons_count: null, game_size_gb: null,
       // Le nom du dossier (doublage FR) est comparé au titre et à ses alias multilingues.
+      aliases: show.aliases,
       match: [show.name, ...show.aliases].some((title) => title && isExactTitle(title, query)) ? 'exact' : 'approximate',
     }))
   } catch { tvdbUnavailableUntil = Date.now() + 5 * 60_000; return [] }
@@ -358,80 +363,65 @@ export interface Completion {
   sources: string[]
 }
 
-const completionRank: Record<string, number> = { anilist: 0, 'jikan-anime': 1, kitsu: 2, tvmaze: 0, tvdb: 1, igdb: 0, rawg: 1, steam: 2, wikipedia: 8 }
+/**
+ * Interroge toutes les sources avec plusieurs variantes du titre et renvoie les œuvres possibles, triées par ressemblance.
+ * Une variante supplémentaire n'est essayée que si les précédentes n'ont rien donné de convaincant.
+ */
+export async function findCandidates(item: CatalogItem, query?: string): Promise<Candidate[]> {
+  const variants = query?.trim() ? [{ text: query.trim(), truncated: false }] : variantsWithKind(item.title)
+  let results: MetadataResult[] = []
+  let failures = 0
+  let attempts = 0
+  for (const [index, { text: variant }] of variants.entries()) {
+    // Chaque variante coûte plusieurs appels limités en débit : on s'arrête dès qu'un candidat sérieux existe.
+    if (index >= 3 || (index > 0 && buildCandidates(item, results, variants).some((candidate) => candidate.score >= 0.7))) break
+    const calls: Promise<MetadataResult[]>[] = []
+    if (item.category === 'anime') {
+      calls.push(anilist(variant), kitsu(variant))
+      if (Date.now() >= jikanUnavailableUntil) calls.push(jikan(variant))
+    } else if (item.category === 'games') calls.push(rawg(variant))
+    else calls.push(tvmaze(variant, item.category), tvdb(variant, item.category))
+    for (const outcome of await Promise.allSettled(calls)) {
+      attempts++
+      if (outcome.status === 'fulfilled') results = mergeMetadataResults(results, outcome.value)
+      else failures++
+    }
+  }
+  if (attempts && failures === attempts) throw new Error('Les sources de fiches ne répondent pas pour le moment. Reprenez plus tard.')
+  if (!buildCandidates(item, results, variants).some((candidate) => candidate.score >= 0.7)) {
+    results = mergeMetadataResults(results, await wikipedia(variants[0].text, item.category))
+  }
+  return buildCandidates(item, results, variants)
+}
 
-function compatibleResult(item: Pick<CatalogItem, 'category' | 'media_format' | 'year'>, result: MetadataResult) {
-  if (result.match !== 'exact' || result.category !== item.category) return false
-  if (item.category === 'anime' && result.media_format && result.media_format !== (item.media_format === 'film' ? 'film' : 'series')) return false
-  if (item.year && result.year && Math.abs(item.year - result.year) > 1) return false
-  return true
+/** Champs manquants d'une fiche, remplis depuis l'œuvre choisie ; le résumé Wikipédia français est préféré. */
+export async function completionFrom(item: CatalogItem, candidate: Candidate): Promise<Completion> {
+  const completion: Completion = { sources: [...candidate.sources] }
+  if (!item.poster_url && candidate.poster_url?.startsWith('https://')) completion.poster_url = candidate.poster_url
+  if (!item.genres.length && candidate.genres.length) completion.genres = candidate.genres.slice(0, 6)
+  if (!item.year && candidate.year) completion.year = candidate.year
+  if (!item.synopsis?.trim()) {
+    const french = await frenchWikiSummary(candidate.title, item.category) ?? (normalizeTitle(candidate.title) !== normalizeTitle(cleanTitle(item.title)) ? await frenchWikiSummary(cleanTitle(item.title) || item.title, item.category) : null)
+    if (french) { completion.synopsis = french.synopsis; completion.synopsisInFrench = true; completion.sources.push('wikipedia-fr') }
+    else if ((candidate.synopsis?.length ?? 0) >= 40) { completion.synopsis = candidate.synopsis!; completion.synopsisInFrench = false }
+  }
+  if (['scan', 'manual', 'pdf-list'].includes(item.source)) {
+    completion.source = candidate.source
+    completion.source_id = candidate.source_id
+    completion.source_url = candidate.source_url
+  }
+  return completion
 }
 
 /**
- * Cherche dans toutes les sources disponibles les informations qui manquent à une fiche.
- * Seules les correspondances exactes et cohérentes (format, année) sont retenues, et rien n'est renvoyé
- * si plusieurs œuvres homonymes d'années différentes restent possibles.
+ * Complète une fiche si une seule œuvre correspond sans aucun doute ; sinon renvoie les candidats
+ * pour que l'administrateur tranche dans la file « À arbitrer ».
  */
-export async function completeMetadata(item: CatalogItem): Promise<Completion | null> {
-  const need = { poster: !item.poster_url, synopsis: !item.synopsis?.trim(), genres: !item.genres.length, year: !item.year }
-  if (!Object.values(need).some(Boolean)) return null
-  const query = cleanTitle(item.title) || item.title.trim()
-  let results: MetadataResult[] = []
-  try { results = await searchMetadata(item.title, item.category, item.media_type, item.media_format, item.year) } catch { /* Les sources complémentaires restent interrogées. */ }
-  const present = new Set(results.map((result) => result.source))
-  if (need.synopsis || need.genres || need.poster) {
-    const extra: Promise<MetadataResult[]>[] = []
-    if (item.category === 'anime') {
-      if (!present.has('anilist')) extra.push(anilist(query))
-      if (!present.has('jikan-anime') && Date.now() >= jikanUnavailableUntil) extra.push(jikan(query))
-      if (!present.has('kitsu')) extra.push(kitsu(query))
-    } else if (item.category !== 'games') {
-      if (!present.has('tvmaze')) extra.push(tvmaze(query, item.category))
-      if (!present.has('tvdb')) extra.push(tvdb(query, item.category))
-    }
-    for (const outcome of await Promise.allSettled(extra)) if (outcome.status === 'fulfilled') results = mergeMetadataResults(results, outcome.value)
-  }
-  let compatible = results.filter((result) => compatibleResult(item, result))
-  if (!item.year) {
-    // Deux œuvres homonymes d'années éloignées : on ne choisit pas au hasard.
-    const years = [...new Set(compatible.map((result) => result.year).filter((year): year is number => Boolean(year)))].sort()
-    if (years.length > 1 && years.at(-1)! - years[0] > 1) {
-      const literal = compatible.filter((result) => normalizeTitle(result.title) === normalizeTitle(query))
-      const literalYears = new Set(literal.map((result) => result.year).filter(Boolean))
-      if (literalYears.size !== 1) return null
-      compatible = literal
-    }
-  }
-  compatible.sort((a, b) => (completionRank[a.source] ?? 5) - (completionRank[b.source] ?? 5))
-  const completion: Completion = { sources: [] }
-  const use = (result: MetadataResult) => { if (!completion.sources.includes(result.source)) completion.sources.push(result.source) }
-  if (need.poster) {
-    const poster = compatible.find((result) => result.poster_url && result.poster_url.startsWith('https://'))
-    if (poster) { completion.poster_url = poster.poster_url!; use(poster) }
-  }
-  if (need.genres) {
-    const genres = compatible.find((result) => result.genres.length && result.source !== 'wikipedia')
-    if (genres) { completion.genres = genres.genres.slice(0, 6); use(genres) }
-  }
-  if (need.year) {
-    const counts = new Map<number, number>()
-    for (const result of compatible) if (result.year) counts.set(result.year, (counts.get(result.year) ?? 0) + 1)
-    const year = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0]
-    if (year) completion.year = year
-  }
-  if (need.synopsis) {
-    const french = await frenchWikiSummary(query, item.category)
-    if (french) { completion.synopsis = french.synopsis; completion.synopsisInFrench = true; completion.sources.push('wikipedia-fr') }
-    else {
-      const described = compatible.find((result) => (result.synopsis?.length ?? 0) >= 40 && result.source !== 'wikipedia')
-      if (described) { completion.synopsis = described.synopsis!; completion.synopsisInFrench = false; use(described) }
-    }
-  }
-  const best = compatible[0]
-  if (best && ['scan', 'manual'].includes(item.source)) {
-    completion.source = best.source
-    completion.source_id = best.source_id
-    completion.source_url = best.source_url
-  }
-  return completion.sources.length || completion.year ? completion : null
+export async function completeMetadata(item: CatalogItem): Promise<{ completion: Completion | null; candidates: Candidate[] }> {
+  const need = !item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year
+  if (!need) return { completion: null, candidates: [] }
+  const candidates = await findCandidates(item)
+  const picked = pickCandidate(candidates)
+  if (!picked) return { completion: null, candidates }
+  return { completion: await completionFrom(item, picked), candidates }
 }

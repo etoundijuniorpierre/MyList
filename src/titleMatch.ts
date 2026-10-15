@@ -26,6 +26,8 @@ const romanNumeral = /^(?:i{1,3}|iv|v|vi{1,3}|ix|x|xi{1,2})$/
 function installment(value: string): string | null {
   const token = value.split(' ').pop() ?? ''
   if (/^\d{1,2}$/.test(token)) return token
+  // « 2V », « 2nd », « 3D » : un chiffre collé reste un numéro d'opus ; une année (« 2016 ») n'en est pas un.
+  if (/\d/.test(token) && token.length <= 4 && !/^(?:19|20)\d{2}$/.test(token)) return token
   return romanNumeral.test(token) ? token : null
 }
 

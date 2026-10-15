@@ -188,6 +188,7 @@ export function cleanTitle(value: string, isFile = false): string {
     .replace(/(?:^|\s)-?DL\b/g, ' ')
     .replace(/\s+l['’-]\s*(?:int[eé]grale)?\s*$/i, ' ')
     .replace(/\b(?:BD|MUX|VO|LD|SD|XVID|XviD|MP3|BluRa|FANSUB|Fansub|HDrip|HDRip|DDL|VOSTF|10B)\b/g, ' ')
+    .replace(/\b(?:remast(?:ered)?|remasteris[ée]e?|multilangue)\b/gi, ' ')
     .replace(/\s+—\s*\S+\s*$/g, ' ')
     .replace(/\b(?:en\s+hd\s+)?streaming\s+gratuitement\b.*$/i, ' ')
     .replace(/\s*[-–]*\s*\b(?:anime[- ]ultime|mavanime|voiranime(?:\s*tv)?|neko[- ]sama|toonanime|japmanga|zone[- ]telechargement(?:\s*com)?|vid[eé]o\s+dailymotion|dailymotion|wawacity|french[- ]anime|vostfree|anime[- ]sama)\b.*$/i, ' ')

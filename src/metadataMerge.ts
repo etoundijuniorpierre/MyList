@@ -11,6 +11,7 @@ export function mergeMetadataResults(...groups: MetadataResult[][]): MetadataRes
       synopsis: current.synopsis ?? result.synopsis,
       genres: current.genres.length ? current.genres : result.genres,
       year: current.year ?? result.year,
+      aliases: [...new Set([...(current.aliases ?? []), ...(result.aliases ?? [])])],
       match: current.match === 'exact' || result.match === 'exact' ? 'exact' : 'approximate',
     })
   }

@@ -52,6 +52,8 @@ export interface SiteSettings {
 
 export interface MetadataResult extends ItemInput {
   match?: 'exact' | 'approximate'
+  /** Autres titres de l'œuvre (romaji, anglais, natif) : servent au rapprochement avec un nom de dossier. */
+  aliases?: string[]
 }
 
 export const categories: { key: Category; label: string; singular: string; number: string }[] = [

@@ -6,6 +6,8 @@ export type PosterJob = {
   retryIds?: string[]
   retryAttempts?: number
   label: string; completed: number; total: number; updated: number; stored: number; missing: number
+  /** Fiches dont les candidats attendent la décision de l'administrateur. */
+  review?: number
   result?: string; error?: string
 }
 export function readPosterJob(): PosterJob | null {
