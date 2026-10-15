@@ -771,3 +771,21 @@ kbd { font-family: var(--body); font-size: 10px; font-weight: 700; color: var(--
 @media (hover: none) {
   .card-genres { max-height: 34px; opacity: 1; }
 }
+
+/* Sagas à décomposer */
+.saga-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); gap: 14px; align-items: start; }
+.saga-card { display: grid; gap: 10px; padding: 16px; border-radius: 16px; background: var(--bg-2); border: 1px solid var(--line-2); }
+.saga-head { display: flex; align-items: center; gap: 12px; }
+.saga-head .cover { width: 44px; height: 64px; border-radius: 7px; flex: none; }
+.saga-head .cover-fallback { padding: 5px; }
+.saga-head .cover-fallback strong { font-size: 8px; }
+.saga-head .cover-fallback small, .saga-head .cover-fallback::before { display: none; }
+.saga-head strong { display: block; font-size: 15px; }
+.saga-head small { font-size: 12px; color: var(--dim); }
+.saga-card .admin-help { margin: 0; }
+.saga-editor textarea { width: 100%; resize: vertical; min-height: 110px; padding: 10px 12px; border-radius: 11px; border: 1px solid var(--line-2); background: var(--surface); color: var(--text); font-size: 13px; line-height: 1.6; outline: 0; }
+.saga-editor textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--glow); }
+.saga-card .admin-row-actions { flex-wrap: wrap; }
+.saga-card .admin-row-actions .button-primary { min-height: 36px; padding: 8px 14px; font-size: 12px; }
+.scan-sagas { display: grid; gap: 8px; margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; background: #c28bff12; border: 1px solid #c28bff40; font-size: 13px; color: var(--muted); }
+.scan-sagas strong { color: var(--text); }

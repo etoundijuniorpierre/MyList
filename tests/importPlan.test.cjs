@@ -71,7 +71,38 @@ test('un dossier de franchise devient une fiche par œuvre', () => {
     file('ANIMES/toaru SAGA/To Aru Majutsu no Index II/Index II - 01.mkv'),
     file('ANIMES/toaru SAGA/Toaru Kagaku no Railgun T/Railgun T - 01.mkv'),
   ])
-  assert.deepEqual(rows.map((row) => row.title).sort(), ['To Aru Majutsu no Index I', 'To Aru Majutsu no Index II', 'Toaru Kagaku no Railgun T'])
+  assert.deepEqual(rows.map((row) => [row.title, row.seasons_count]).sort(), [['To Aru Majutsu no Index', 2], ['Toaru Kagaku no Railgun T', 1]])
+})
+
+test('une saga rangée par ordre de visionnage donne une fiche par œuvre, pas des saisons', () => {
+  const rows = scanFolder([
+    file('ANIME MANGA EJEP/animé/Mobile Suit Gundam/1-Mobile Suit Gundam The Origin/Mobile Suit Gundam The origin Episode 1.mp4'),
+    file('ANIME MANGA EJEP/animé/Mobile Suit Gundam/1-Mobile Suit Gundam The Origin/Mobile Suit Gundam The origin Episode 2.mp4'),
+    file('ANIME MANGA EJEP/animé/Mobile Suit Gundam/10-Mobile Suit Gundam Wing/Mobile Suit Gundam Wing - 01 VOSTFR.mp4'),
+    file('ANIME MANGA EJEP/animé/Mobile Suit Gundam/10-Mobile Suit Gundam Wing/Mobile Suit Gundam Wing - 02 VOSTFR.mp4'),
+    file('ANIME MANGA EJEP/animé/Mobile Suit Gundam/19-Mobile Suit Gundam SEED/Gundam SEED - 01.mkv'),
+    file('ANIME MANGA EJEP/animé/Mobile Suit Gundam/19-Mobile Suit Gundam SEED/Gundam SEED - 02.mkv'),
+  ])
+  assert.deepEqual(rows.map((row) => [row.title, row.seasons_count, row.franchise_of]).sort(), [
+    ['Mobile Suit Gundam SEED', 1, 'Mobile Suit Gundam'], ['Mobile Suit Gundam The Origin', 1, 'Mobile Suit Gundam'], ['Mobile Suit Gundam Wing', 1, 'Mobile Suit Gundam'],
+  ])
+  const saint = scanFolder([
+    file('ANIME MANGA EJEP/animé/Saint Seiya Saga/1-Saint Seiya (Les Chevaliers Du Zodiaque)/1--Saint Seiya Le sanctuaire/01.avi'),
+    file('ANIME MANGA EJEP/animé/Saint Seiya Saga/1-Saint Seiya (Les Chevaliers Du Zodiaque)/2--Saint Seiya, Hadès Le sanctuaire/01.avi'),
+    file('ANIME MANGA EJEP/animé/Saint Seiya Saga/1-Saint Seiya (Les Chevaliers Du Zodiaque)/3--Saint Seiya, Hadès Inferno/01.avi'),
+    file('ANIME MANGA EJEP/animé/Saint Seiya Saga/4-Saint Seiya  OMEGA/52 Une nouvelle armure.avi'),
+    file('ANIME MANGA EJEP/animé/Saint Seiya Saga/4-Saint Seiya  OMEGA/53 Le retour.avi'),
+  ])
+  assert.deepEqual(saint.map((row) => [row.title, row.seasons_count]).sort(), [['Saint Seiya (Les Chevaliers Du Zodiaque)', 3], ['Saint Seiya OMEGA', 1]])
+})
+
+test('une collection de films devient un film par fichier', () => {
+  const rows = scanFolder([
+    file('ANIMES/Collection Studio Ghibli/Le Voyage de Chihiro.mkv'),
+    file('ANIMES/Collection Studio Ghibli/Mon voisin Totoro.mkv'),
+    file('ANIMES/Collection Studio Ghibli/Princesse Mononoke.mkv'),
+  ])
+  assert.deepEqual(rows.map((row) => [row.title, row.media_format]).sort(), [['Le Voyage de Chihiro', 'film'], ['Mon voisin Totoro', 'film'], ['Princesse Mononoke', 'film']])
 })
 
 test('les épisodes rangés en vrac forment une seule fiche', () => {
@@ -99,4 +130,41 @@ test('les capitales criées sont adoucies sans casser les apostrophes', () => {
   assert.equal(softenCase("DARWIN'S INCIDENT"), "Darwin's Incident")
   assert.equal(softenCase("CAMERON BLACK L'ILLUSIONNISTE"), "Cameron Black L'Illusionniste")
   assert.equal(softenCase('NCIS LOS ANGELES'), 'NCIS Los Angeles')
+})
+
+test('un dossier « Saison 1 » écrit avec une espace insécable compte comme une saison', () => {
+  const rows = scanFolder([
+    file('ANIMES/Scissor Seven/Saison 1/Scissor Seven_S01E01_Comment devenir riche.mp4'),
+    file('ANIMES/Scissor Seven/Saison 2/Scissor Seven_S02E01_Le maitre.mp4'),
+    file('ANIMES/Scissor Seven/Saison 3/Scissor Seven_S03E01_Adieu.mp4'),
+  ])
+  assert.deepEqual(rows.map((row) => [row.title, row.seasons_count]), [['Scissor Seven', 3]])
+})
+
+test('la fiche qui regroupait une saga découpée est proposée au masquage, jamais une œuvre mise à jour', () => {
+  const { sagaReplacements } = require('../src/catalogImport.ts')
+  const rows = scanFolder([
+    file('ANIMES/Saint Seiya Saga/2-Saint Seiya  Soul of Gold/1.mkv'),
+    file('ANIMES/Saint Seiya Saga/2-Saint Seiya  Soul of Gold/2.mkv'),
+    file('ANIMES/Saint Seiya Saga/4-Saint Seiya  OMEGA/52 Une nouvelle armure.avi'),
+    file('ANIMES/Saint Seiya Saga/4-Saint Seiya  OMEGA/53 Le retour.avi'),
+  ])
+  const saga = existing({ id: 'saga', title: 'Saint Seiya Saga', seasons_count: 1 })
+  const omega = existing({ id: 'omega', title: 'Saint Seiya OMEGA', seasons_count: 2 })
+  const plan = planScanImport(rows, [saga, omega])
+  assert.deepEqual(sagaReplacements(rows, [saga, omega], plan).map((item) => item.id), ['saga'])
+})
+
+test('les décompositions préremplies reconnaissent les fiches regroupées sans toucher aux vrais titres', () => {
+  const { sagaPreset, looksLikeSaga, parseWorks } = require('../src/admin/sagaPresets.ts')
+  assert.equal(sagaPreset('Mobile Suit Gundam - Pack - GundamGuy').works.length > 30, true)
+  assert.equal(sagaPreset('Mobile Suit Gundam'), null)
+  assert.equal(sagaPreset('[29 Fichiers]').works.some((work) => work.title === 'Paprika' && work.format === 'film'), true)
+  assert.equal(looksLikeSaga('Excel Saga'), false)
+  assert.equal(looksLikeSaga('Vinland Saga'), false)
+  assert.equal(looksLikeSaga('toaru SAGA'), true)
+  assert.equal(looksLikeSaga('[2 Fichiers]'), true)
+  assert.deepEqual(parseWorks('Owarimonogatari ; 2 saisons\nKizumonogatari I ; film\nHanamonogatari'), [
+    { title: 'Owarimonogatari', format: 'series', seasons: 2 }, { title: 'Kizumonogatari I', format: 'film', seasons: null }, { title: 'Hanamonogatari', format: 'series', seasons: 1 },
+  ])
 })

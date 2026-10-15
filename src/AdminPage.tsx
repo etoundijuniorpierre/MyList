@@ -5,7 +5,8 @@ import type { User } from '@supabase/supabase-js'
 import { cachePosterUrl, isCachedPosterUrl, searchMetadata } from './metadata'
 import { scanFolder, type ScannedItem } from './folderScan'
 import { uniqueExactMatch } from './titleMatch'
-import { isCatalogNoiseTitle, mergeCatalogUpdate, planScanImport, sameCatalogTitle, unmatchedAnime, type ScanPlanEntry } from './catalogImport'
+import { isCatalogNoiseTitle, mergeCatalogUpdate, planScanImport, sagaReplacements, sameCatalogTitle, unmatchedAnime, type ScanPlanEntry } from './catalogImport'
+import { looksLikeSaga } from './admin/sagaPresets'
 import { itemPrice, validateGameTiers } from './pricing'
 import { isConfigured, supabase } from './supabase'
 import { Cover, formatPrice, safeUrl, translateSynopsisToFrench } from './media'
@@ -51,6 +52,10 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
   // Aperçu de l'import : chaque ligne scannée est rapprochée du catalogue avant toute écriture.
   const scanPlan = useMemo(() => planScanImport(scanned, items), [scanned, items])
   const planByRow = useMemo(() => new Map(scanPlan.flatMap((entry) => entry.rows.map((row) => [row.id, entry] as const))), [scanPlan])
+  // Une saga découpée par le scan remplace la fiche qui la regroupait : elle est proposée au masquage.
+  const sagaRetire = useMemo(() => sagaReplacements(scanned, items, scanPlan), [scanned, items, scanPlan])
+  const [retireIds, setRetireIds] = useState<Set<string>>(new Set())
+  useEffect(() => { setRetireIds(new Set(sagaRetire.filter((item) => looksLikeSaga(item.title)).map((item) => item.id))) }, [sagaRetire])
   const scanCounts = useMemo(() => ({ new: scanPlan.filter((entry) => entry.status === 'new').length, update: scanPlan.filter((entry) => entry.status === 'update').length, unchanged: scanPlan.filter((entry) => entry.status === 'unchanged').length }), [scanPlan])
   useEffect(() => { setPageMeta('Administration', 'noindex'); return () => setPageMeta('') }, [])
   useEffect(() => { setCurrency(prices.find((rule) => rule.currency)?.currency ?? gameTiers[0]?.currency ?? gameDiscount.currency ?? ''); setPriceInputs(Object.fromEntries((['series', 'anime', 'anime-film', 'novelas', 'dramas'] as const).map((category) => { const rule = prices.find((entry) => entry.category === category); return [category, { standard: String(rule?.standard_price ?? ''), threshold: String(rule?.threshold_seasons ?? ''), reduced: String(rule?.threshold_price ?? '') }] })) as typeof priceInputs); setTierInputs(gameTiers); setDiscountCount(String(gameDiscount.min_games ?? '')); setDiscountPrice(String(gameDiscount.price_per_game ?? '')) }, [prices, gameTiers, gameDiscount])
@@ -299,6 +304,12 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
       // Les fiches nouvelles ou incomplètes passent ensuite par toutes les sources de métadonnées.
       const needsData = new Set(writes.filter((entry) => !entry.existing || !entry.existing.poster_url || !entry.existing.synopsis?.trim() || !entry.existing.genres.length).map((entry) => entry.existing?.id))
       completeAfterImport(savedIds.filter((id) => needsData.has(id) || !items.some((item) => item.id === id)))
+      const retired = [...retireIds].filter((id) => sagaRetire.some((item) => item.id === id))
+      if (retired.length) {
+        const { error: retireError } = await supabase.from('catalog_items').update({ active: false }).in('id', retired)
+        if (retireError) firstError ||= `Fiches regroupées non masquées : ${retireError.message}`
+        else await onChanged()
+      }
       const summary = `${plural(done, 'fiche')} enregistrée${done > 1 ? 's' : ''} (${created} nouvelle${created > 1 ? 's' : ''}), ${plural(unchanged, 'titre')} déjà à jour, ${plural(failed, 'échec')}.${firstError && failed ? ` Erreur : ${firstError}` : ''}`
       if (failed) setMessage(summary); else showSuccess(summary)
     } catch (error) {
@@ -399,6 +410,10 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
       </ul></details>
       {scanProgress && <p className="admin-message is-info" role="status">{scanProgress}</p>}
       {scanned.length > 0 && <>
+        {sagaRetire.length > 0 && <div className="scan-sagas" role="group" aria-label="Fiches regroupées remplacées">
+          <span><strong>Sagas découpées.</strong> Ces fiches du catalogue regroupaient les œuvres maintenant séparées. Cochées, elles seront masquées (pas supprimées) après l’import :</span>
+          {sagaRetire.map((item) => <label className="checkbox-label" key={item.id}><input type="checkbox" checked={retireIds.has(item.id)} onChange={(event) => setRetireIds((current) => { const next = new Set(current); if (event.target.checked) next.add(item.id); else next.delete(item.id); return next })} /> « {item.title} » · {item.seasons_count ?? '?'} saison(s)</label>)}
+        </div>}
         <div className="scan-summary" role="group" aria-label="Filtrer l’aperçu">
           {([['all', 'Tout', scanned.length], ['new', 'Nouveaux', scanCounts.new], ['update', 'Mises à jour', scanCounts.update], ['unchanged', 'Déjà à jour', scanCounts.unchanged]] as const).map(([key, label, count]) => <button type="button" key={key} className={`scan-filter scan-${key} ${scanView === key ? 'is-on' : ''}`} aria-pressed={scanView === key} onClick={() => setScanView(key)}><strong>{count.toLocaleString('fr-FR')}</strong><span>{label}</span></button>)}
         </div>

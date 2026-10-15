@@ -223,3 +223,21 @@ export function planScanImport(rows: ScannedItem[], items: CatalogItem[]): ScanP
     return { key, rows: sources, existing, status, changes, input }
   })
 }
+
+/**
+ * Fiches du catalogue qui regroupaient une saga désormais découpée par le scan (« Saint Seiya Saga », « toaru SAGA »).
+ * Seules les sagas entièrement découpées sont proposées, et jamais une fiche que le scan met lui-même à jour.
+ */
+export function sagaReplacements(rows: ScannedItem[], items: CatalogItem[], plan: ScanPlanEntry[]): CatalogItem[] {
+  const matched = new Set(plan.map((entry) => entry.existing?.id).filter(Boolean))
+  const parents = new Map<string, ScannedItem>()
+  for (const row of rows) if (row.franchise_of && !row.parentId) parents.set(`${row.category}:${importTitle(row.franchise_of)}`, row)
+  const found = new Map<string, CatalogItem>()
+  for (const [, row] of parents) {
+    for (const item of items) {
+      if (!item.active || matched.has(item.id) || item.category !== row.category) continue
+      if (importTitle(item.title) === importTitle(row.franchise_of!) || normalizeTitle(item.title) === normalizeTitle(row.franchise_of!)) found.set(item.id, item)
+    }
+  }
+  return [...found.values()]
+}

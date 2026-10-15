@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowRight, Check, Copy, Languages, Sparkles, WandSparkles } from 'lucide-react'
+import { ArrowRight, Check, Copy, EyeOff, Languages, Layers, Sparkles, WandSparkles } from 'lucide-react'
 import { supabase } from '../supabase'
 import { Cover } from '../media'
 import { kindLabel, measureLabel, plural } from '../display'
@@ -7,6 +7,11 @@ import { issueLabels, itemIssues, probableDuplicates, suggestTitle, type HealthI
 import { categoryLabel, titleKey, type CatalogItem, type Category } from '../types'
 import type { PosterJobKind } from '../App'
 import type { Confirm } from './useConfirm'
+import { catalogIdentity } from '../catalogImport'
+import { formatWorks, looksLikeSaga, parseWorks, sagaPreset } from './sagaPresets'
+
+const SAGA_IGNORED_KEY = 'mylist-saga-ignored'
+function readIgnored() { try { return new Set<string>(JSON.parse(localStorage.getItem(SAGA_IGNORED_KEY) ?? '[]')) } catch { return new Set<string>() } }
 
 interface Props {
   items: CatalogItem[]
@@ -34,6 +39,69 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onMessa
   const pending = suggestions.filter(({ item }) => !skipped.has(item.id))
   const incomplete = items.filter((item) => !item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year)
   const translatable = items.filter((item) => Boolean(item.synopsis?.trim()))
+  const [ignoredSagas, setIgnoredSagas] = useState(readIgnored)
+  const [sagaTexts, setSagaTexts] = useState<Record<string, string>>({})
+  const sagas = useMemo(() => items.filter((item) => item.active && item.category === 'anime' && looksLikeSaga(item.title) && !ignoredSagas.has(item.id)), [items, ignoredSagas])
+
+  function ignoreSaga(id: string) {
+    setIgnoredSagas((current) => {
+      const next = new Set(current).add(id)
+      try { localStorage.setItem(SAGA_IGNORED_KEY, JSON.stringify([...next])) } catch { /* Le choix reste valable pour cette session. */ }
+      return next
+    })
+  }
+  async function hideSaga(saga: CatalogItem) {
+    if (!supabase) return
+    const ok = await confirm({ title: `Masquer « ${saga.title} » ?`, body: 'La fiche disparaît du site mais reste dans le catalogue (onglet Titres, filtre « Masqués »). Vous pourrez la republier ou la décomposer plus tard.', confirm: 'Masquer' })
+    if (!ok) return
+    const { error } = await supabase.from('catalog_items').update({ active: false }).eq('id', saga.id)
+    if (error) { onMessage(error.message); return }
+    await onChanged()
+    onMessage(`« ${saga.title} » est masquée.`, true)
+  }
+  /** Crée une fiche par œuvre (sans recréer celles déjà présentes), masque la fiche regroupée et lance la recherche d'affiches. */
+  async function decompose(saga: CatalogItem) {
+    if (!supabase) return
+    const works = parseWorks(sagaTexts[saga.id] ?? formatWorks(sagaPreset(saga.title)?.works ?? []))
+    if (!works.length) { onMessage('Indiquez au moins une œuvre, une par ligne : « Titre ; 2 saisons » ou « Titre ; film ».'); return }
+    const mediaType = saga.category === 'anime' ? 'anime' : saga.media_type
+    const identity = (title: string, format: 'series' | 'film') => catalogIdentity(saga.category, mediaType, title, saga.category === 'anime' ? format : null)
+    const known = new Map(items.filter((item) => item.id !== saga.id).map((item) => [catalogIdentity(item.category, item.media_type, item.title, item.media_format), item]))
+    const existing = works.filter((work) => known.has(identity(work.title, work.format)))
+    const created = works.filter((work) => !known.has(identity(work.title, work.format)))
+    const ok = await confirm({
+      title: `Décomposer « ${saga.title} » ?`,
+      body: `${plural(created.length, 'nouvelle fiche', 'nouvelles fiches')} ${created.length > 1 ? 'seront créées' : 'sera créée'}${existing.length ? `, ${plural(existing.length, 'œuvre')} déjà au catalogue ${existing.length > 1 ? 'sont conservées' : 'est conservée'} (${existing.slice(0, 3).map((work) => work.title).join(', ')}${existing.length > 3 ? '…' : ''})` : ''}. « ${saga.title} » sera ensuite masquée, pas supprimée. Les affiches et descriptions des nouvelles fiches seront recherchées automatiquement.`,
+      confirm: 'Décomposer',
+    })
+    if (!ok) return
+    setWorking(true)
+    try {
+      const rows = created.map((work) => {
+        const format = saga.category === 'anime' ? work.format : null
+        return {
+          category: saga.category, media_type: mediaType, media_format: format, title: work.title,
+          title_key: titleKey(saga.category, mediaType, work.title, format),
+          synopsis: null, poster_url: null, genres: [], year: null, source: 'manual', source_id: null, source_url: null, active: true,
+          seasons_count: saga.category === 'games' || work.format === 'film' ? null : work.seasons ?? 1, game_size_gb: null,
+        }
+      })
+      const newIds: string[] = []
+      for (let start = 0; start < rows.length; start += 40) {
+        const { data, error } = await supabase.from('catalog_items').upsert(rows.slice(start, start + 40), { onConflict: 'title_key', ignoreDuplicates: true }).select('id')
+        if (error) throw new Error(error.message)
+        newIds.push(...(data ?? []).map((row) => row.id as string))
+      }
+      const hidden = await supabase.from('catalog_items').update({ active: false }).eq('id', saga.id)
+      if (hidden.error) throw new Error(`Les œuvres sont créées, mais « ${saga.title} » n’a pas pu être masquée : ${hidden.error.message}`)
+      await onChanged()
+      setSagaTexts((current) => { const next = { ...current }; delete next[saga.id]; return next })
+      onMessage(`« ${saga.title} » décomposée : ${plural(newIds.length, 'fiche créée', 'fiches créées')}${existing.length ? `, ${plural(existing.length, 'œuvre')} déjà présente${existing.length > 1 ? 's' : ''}` : ''}. La fiche regroupée est masquée.`, true)
+      if (newIds.length && !posterJobRunning) void onRunPosterJob('complete', 'all', newIds)
+    } catch (error) {
+      onMessage(error instanceof Error ? error.message : 'Décomposition impossible.')
+    } finally { setWorking(false) }
+  }
 
   async function rename(list: { item: CatalogItem; suggestion: NonNullable<ReturnType<typeof suggestTitle>> }[]) {
     if (!supabase || !list.length) return
@@ -66,6 +134,21 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onMessa
       <div className="issue-chips">{(Object.entries(counts) as [HealthIssue, number][]).map(([issue, count]) => <button type="button" key={issue} className={`issue-chip ${count ? '' : 'is-ok'}`} disabled={!count} onClick={() => onShowIssue(issue)}><span>{issueLabels[issue]}</span><strong>{count.toLocaleString('fr-FR')}</strong></button>)}</div>
       {counts.measure > 0 && <p className="scan-help">Les fiches sans mesure doivent être vérifiées à partir de vos fichiers ou de la fiche de l’œuvre. Cliquez sur « Saisons ou taille manquantes » ci-dessus pour les ouvrir et saisir une valeur exacte.</p>}
     </section>
+
+    {sagas.length > 0 && <section className="admin-card">
+      <div className="admin-panel-head"><div><h2><Layers size={20} aria-hidden="true" /> Sagas et regroupements à décomposer</h2><p>Ces fiches regroupent plusieurs œuvres (saga rangée par ordre de visionnage, collection de films, fichiers en vrac). Vérifiez la liste, une œuvre par ligne : « Titre ; 2 saisons » ou « Titre ; film ».</p></div></div>
+      <div className="saga-list">{sagas.map((saga) => {
+        const preset = sagaPreset(saga.title)
+        const text = sagaTexts[saga.id] ?? formatWorks(preset?.works ?? [])
+        const count = parseWorks(text).length
+        return <div className="saga-card" key={saga.id}>
+          <div className="saga-head"><Cover item={saga} sizes="44px" /><div><strong>{saga.title}</strong><small>{kindLabel(saga)} · {measureLabel(saga)}</small></div></div>
+          <p className="admin-help">{preset ? preset.note : /^\[\s*\d+\s+fichiers?\s*\]$/i.test(saga.title.trim()) ? 'Cette fiche vient d’un rapport de disque qui n’indique pas les noms des fichiers posés en vrac. Rebranchez le disque et scannez-le pour retrouver les titres, ou masquez la fiche.' : 'Aucune liste connue : saisissez les œuvres, ou scannez le dossier, le scanner découpe désormais les sagas automatiquement.'}</p>
+          <label className="saga-editor"><span className="visually-hidden">Œuvres de {saga.title}</span><textarea rows={Math.min(14, Math.max(4, count + 1))} value={text} onChange={(event) => setSagaTexts((current) => ({ ...current, [saga.id]: event.target.value }))} placeholder={'Titre de l’œuvre ; 2 saisons\nTitre du film ; film'} /></label>
+          <div className="admin-row-actions"><button type="button" className="button-primary" disabled={working || !count} onClick={() => void decompose(saga)}><Layers size={15} /> Créer {plural(count, 'œuvre')} et masquer la fiche</button><button type="button" disabled={working} onClick={() => void hideSaga(saga)}><EyeOff size={15} /> Seulement masquer</button><button type="button" onClick={() => ignoreSaga(saga.id)}>Ce n’est pas une saga</button></div>
+        </div>
+      })}</div>
+    </section>}
 
     <section className="admin-card">
       <div className="admin-panel-head"><div><h2>Titres à nettoyer</h2><p>{pending.length ? `${plural(pending.length, 'proposition')} : balises de release, suffixes « (5) », capitales criées. Modifiez une proposition avant de l’appliquer si besoin.` : 'Tous les titres sont propres.'}</p></div>
