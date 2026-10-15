@@ -168,3 +168,16 @@ test('les décompositions préremplies reconnaissent les fiches regroupées sans
     { title: 'Owarimonogatari', format: 'series', seasons: 2 }, { title: 'Kizumonogatari I', format: 'film', seasons: null }, { title: 'Hanamonogatari', format: 'series', seasons: 1 },
   ])
 })
+
+test('les choix de l’admin sur les regroupements sont respectés', () => {
+  const { sagaPreset, looksLikeSaga, isNoiseEntry } = require('../src/admin/sagaPresets.ts')
+  const loose = sagaPreset('[29 Fichiers]').works
+  assert.equal(loose.every((work) => work.format === 'film'), true)
+  assert.equal(loose.some((work) => /steins|migi|spirit warrior|maria-sama|sakra/i.test(work.title)), false)
+  assert.equal(looksLikeSaga('Films'), false)
+  assert.equal(isNoiseEntry('[2 Fichiers]'), true)
+  assert.equal(isNoiseEntry('[29 Fichiers]'), false)
+  const monogatari = sagaPreset('Monogatari ALL SERIE').works
+  assert.equal(monogatari.filter((work) => work.format === 'film').length, 4)
+  assert.equal(sagaPreset('Dragon Ball Z Films').works.length, 17)
+})

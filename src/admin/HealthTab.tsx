@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowRight, Check, Copy, EyeOff, Languages, Layers, Sparkles, WandSparkles } from 'lucide-react'
+import { ArrowRight, Check, Copy, EyeOff, Languages, Layers, Sparkles, Trash2, WandSparkles } from 'lucide-react'
 import { supabase } from '../supabase'
 import { Cover } from '../media'
 import { kindLabel, measureLabel, plural } from '../display'
@@ -8,7 +8,7 @@ import { categoryLabel, titleKey, type CatalogItem, type Category } from '../typ
 import type { PosterJobKind } from '../App'
 import type { Confirm } from './useConfirm'
 import { catalogIdentity } from '../catalogImport'
-import { formatWorks, looksLikeSaga, parseWorks, sagaPreset } from './sagaPresets'
+import { formatWorks, isNoiseEntry, looksLikeSaga, parseWorks, sagaPreset } from './sagaPresets'
 
 const SAGA_IGNORED_KEY = 'mylist-saga-ignored'
 function readIgnored() { try { return new Set<string>(JSON.parse(localStorage.getItem(SAGA_IGNORED_KEY) ?? '[]')) } catch { return new Set<string>() } }
@@ -58,6 +58,15 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onMessa
     if (error) { onMessage(error.message); return }
     await onChanged()
     onMessage(`« ${saga.title} » est masquée.`, true)
+  }
+  async function removeNoise(saga: CatalogItem) {
+    if (!supabase) return
+    const ok = await confirm({ title: `Retirer « ${saga.title} » ?`, body: 'Cette fiche vient d’un rapport de disque et ne désigne aucune œuvre. Elle sera supprimée définitivement du catalogue.', confirm: 'Retirer', danger: true })
+    if (!ok) return
+    const { error } = await supabase.from('catalog_items').delete().eq('id', saga.id)
+    if (error) { onMessage(error.message); return }
+    await onChanged()
+    onMessage(`« ${saga.title} » a été retirée du catalogue.`, true)
   }
   /** Crée une fiche par œuvre (sans recréer celles déjà présentes), masque la fiche regroupée et lance la recherche d'affiches. */
   async function decompose(saga: CatalogItem) {
@@ -143,9 +152,9 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onMessa
         const count = parseWorks(text).length
         return <div className="saga-card" key={saga.id}>
           <div className="saga-head"><Cover item={saga} sizes="44px" /><div><strong>{saga.title}</strong><small>{kindLabel(saga)} · {measureLabel(saga)}</small></div></div>
-          <p className="admin-help">{preset ? preset.note : /^\[\s*\d+\s+fichiers?\s*\]$/i.test(saga.title.trim()) ? 'Cette fiche vient d’un rapport de disque qui n’indique pas les noms des fichiers posés en vrac. Rebranchez le disque et scannez-le pour retrouver les titres, ou masquez la fiche.' : 'Aucune liste connue : saisissez les œuvres, ou scannez le dossier, le scanner découpe désormais les sagas automatiquement.'}</p>
-          <label className="saga-editor"><span className="visually-hidden">Œuvres de {saga.title}</span><textarea rows={Math.min(14, Math.max(4, count + 1))} value={text} onChange={(event) => setSagaTexts((current) => ({ ...current, [saga.id]: event.target.value }))} placeholder={'Titre de l’œuvre ; 2 saisons\nTitre du film ; film'} /></label>
-          <div className="admin-row-actions"><button type="button" className="button-primary" disabled={working || !count} onClick={() => void decompose(saga)}><Layers size={15} /> Créer {plural(count, 'œuvre')} et masquer la fiche</button><button type="button" disabled={working} onClick={() => void hideSaga(saga)}><EyeOff size={15} /> Seulement masquer</button><button type="button" onClick={() => ignoreSaga(saga.id)}>Ce n’est pas une saga</button></div>
+          <p className="admin-help">{preset ? preset.note : /^\[\s*\d+\s+fichiers?\s*\]$/i.test(saga.title.trim()) ? 'Cette fiche vient d’un rapport de disque et ne désigne aucune œuvre : retirez-la du catalogue.' : 'Aucune liste connue : saisissez les œuvres, ou scannez le dossier, le scanner découpe désormais les sagas automatiquement.'}</p>
+          {isNoiseEntry(saga.title) ? <div className="admin-row-actions"><button type="button" className="button-danger" disabled={working} onClick={() => void removeNoise(saga)}><Trash2 size={15} /> Retirer cette fiche</button><button type="button" disabled={working} onClick={() => void hideSaga(saga)}><EyeOff size={15} /> Seulement masquer</button></div> : <><label className="saga-editor"><span className="visually-hidden">Œuvres de {saga.title}</span><textarea rows={Math.min(14, Math.max(4, count + 1))} value={text} onChange={(event) => setSagaTexts((current) => ({ ...current, [saga.id]: event.target.value }))} placeholder={'Titre de l’œuvre ; 2 saisons\nTitre du film ; film'} /></label>
+          <div className="admin-row-actions"><button type="button" className="button-primary" disabled={working || !count} onClick={() => void decompose(saga)}><Layers size={15} /> Créer {plural(count, 'œuvre')} et masquer la fiche</button><button type="button" disabled={working} onClick={() => void hideSaga(saga)}><EyeOff size={15} /> Seulement masquer</button><button type="button" onClick={() => ignoreSaga(saga.id)}>Ce n’est pas une saga</button></div></>}
         </div>
       })}</div>
     </section>}
