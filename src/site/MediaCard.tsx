@@ -29,8 +29,8 @@ function MediaCardBase({ item, selected, priority, onOpen, onToggle, onEdit }: P
       <h3>{item.title}</h3>
       <p className="card-meta"><span>{item.year ?? '—'}</span><span>{measureLabel(item)}</span></p>
       <p className="card-genres">{item.genres.slice(0, 3).join(' · ') || 'Genre à découvrir'}</p>
-      <button type="button" className={`card-add ${selected ? 'is-on' : ''}`} onClick={() => onToggle(item)} tabIndex={-1} aria-hidden="true">
-        {selected ? <><Check size={15} /> Dans le panier</> : <><Plus size={15} /> Ajouter</>}
+      <button type="button" className={`card-add ${selected ? 'is-on' : ''}`} onClick={() => onToggle(item)} aria-pressed={selected} aria-label={selected ? `Retirer ${item.title} du panier` : `Ajouter ${item.title} au panier`}>
+        {selected ? <><Check size={15} /> Ajouté</> : <><Plus size={15} /> Ajouter</>}
       </button>
     </div>
   </article>

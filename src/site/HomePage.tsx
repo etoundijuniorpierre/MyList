@@ -7,6 +7,7 @@ import { categories, type CatalogItem } from '../types'
 import { useHomeData } from '../useHomeData'
 import { useSite } from './context'
 import { useLightweightDisplay } from '../useLightweightDisplay'
+import { StaticPosterBackdrop } from './StaticPosterBackdrop'
 
 export function HomePage({ demo }: { demo: CatalogItem[] }) {
   const { shelves, error } = useHomeData(demo)
@@ -15,12 +16,13 @@ export function HomePage({ demo }: { demo: CatalogItem[] }) {
   useEffect(() => { setPageMeta('') }, [])
   const total = shelves?.reduce((sum, shelf) => sum + shelf.count, 0) ?? 0
   const posters = shelves?.flatMap((shelf) => shelf.latest) ?? []
+  const mobilePosters = shelves?.flatMap(shelf => shelf.latest.find(item => item.poster_url) ?? []) ?? []
   // Trois bandes d'affiches qui défilent en sens opposés : la vitrine du vidéo-club.
   const rows = [0, 1, 2].map((row) => posters.filter((_, index) => index % 3 === row))
 
   return <main id="contenu" tabIndex={-1} className="home-page">
     <section className="home-hero">
-      {!lightweight && <div className="marquee" aria-hidden="true">
+      {lightweight ? <StaticPosterBackdrop items={mobilePosters} /> : <div className="marquee" aria-hidden="true">
         {rows.map((row, index) => row.length > 0 && <div className={`marquee-row marquee-${index}`} key={index}><div className="marquee-track">{[...row, ...row].map((item, position) => <Cover key={`${item.id}-${position}`} item={item} priority={position < 6} sizes="150px" />)}</div></div>)}
       </div>}
       <div className="home-veil" aria-hidden="true" />

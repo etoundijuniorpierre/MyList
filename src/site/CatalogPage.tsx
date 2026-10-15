@@ -8,6 +8,7 @@ import { useSite } from './context'
 import { DetailDialog } from './DetailDialog'
 import { MediaCard, SkeletonGrid } from './MediaCard'
 import { useLightweightDisplay } from '../useLightweightDisplay'
+import { StaticPosterBackdrop } from './StaticPosterBackdrop'
 
 type Sort = 'recent' | 'az' | 'za' | 'year-desc' | 'year-asc'
 const sortLabels: Record<Sort, string> = { recent: 'Ajouts récents', az: 'Titre A → Z', za: 'Titre Z → A', 'year-desc': 'Plus récents d’abord', 'year-asc': 'Plus anciens d’abord' }
@@ -84,7 +85,7 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
   const navigateItem = useCallback((item: CatalogItem) => update({ titre: item.id }), [update])
   const closeItem = useCallback(() => update({ titre: null }), [update])
   const edit = useCallback((item: CatalogItem) => navigate(`/admin?edit=${encodeURIComponent(item.id)}`), [navigate])
-  const wall = useMemo(() => lightweight ? [] : pageItems.filter(item => item.poster_url).slice(0, 14), [pageItems, lightweight])
+  const wall = useMemo(() => pageItems.filter(item => item.poster_url).slice(0, lightweight ? 3 : 14), [pageItems, lightweight])
   const priceHint = pricingHint(category, prices, gameTiers, gameDiscount)
   const yearGroups = byYear ? [...new Set(pageItems.map(item => item.year))] : []
 
@@ -94,7 +95,7 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
 
   return <main id="contenu" tabIndex={-1} className="catalog-page" style={{ '--accent': meta.accent, '--glow': meta.glow } as CSSProperties}>
     <section className="universe-hero">
-      <div className="hero-wall" aria-hidden="true">{wall.map((item, index) => <Cover key={item.id} item={item} priority={index < 4} sizes="160px" />)}</div>
+      {lightweight ? <StaticPosterBackdrop items={wall} /> : <div className="hero-wall" aria-hidden="true">{wall.map((item, index) => <Cover key={item.id} item={item} priority={index < 4} sizes="160px" />)}</div>}
       <div className="hero-veil" aria-hidden="true" />
       <div className="universe-hero-inner">
         <span className="eyebrow">{meta.eyebrow} · {label}</span><h1>{meta.title[0]} <em>{meta.title[1]}</em></h1><p>{meta.copy}</p>
