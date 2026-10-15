@@ -9,7 +9,7 @@ require.extensions['.ts'] = (module, filename) => {
   module._compile(compiled.outputText, filename)
 }
 
-const { CATALOG_PAGE_SIZE, fetchCatalogPages } = require('../src/catalogData.ts')
+const { BROWSE_PAGE_SIZE, CATALOG_PAGE_SIZE, fetchCatalogPages, filterDemoCatalog } = require('../src/catalogData.ts')
 
 test('la catégorie courte est chargée en une requête avec son compte exact', async () => {
   const calls = []
@@ -35,4 +35,20 @@ test('les doublons sont dédupliqués et une page en erreur ne renvoie jamais un
   await assert.rejects(() => fetchCatalogPages(async from => from === 0
     ? { data: Array.from({ length: 500 }, (_, id) => ({ id: String(id) })), count: 501, error: null }
     : { data: null, count: null, error: { message: 'Lecture interrompue' } }), /Lecture interrompue/)
+})
+
+test('la pagination de démonstration filtre avant de découper la page et garde les compteurs globaux', () => {
+  const items = Array.from({ length: 61 }, (_, index) => ({
+    id: String(index), category: 'anime', active: true, media_type: 'anime', media_format: index % 2 ? 'film' : 'series',
+    title: `Titre ${String(index).padStart(2, '0')}`, genres: [index % 2 ? 'Aventure' : 'Action'], year: 2020 + index % 3,
+    seasons_count: index % 2 ? null : 2, game_size_gb: null,
+  }))
+  const result = filterDemoCatalog(items, { category: 'anime', page: 2, query: '', genre: '', year: '', origin: '', format: '', sort: 'az', byYear: false })
+  assert.equal(result.total, 61)
+  assert.equal(result.items.length, BROWSE_PAGE_SIZE)
+  assert.equal(result.items[0].title, 'Titre 24')
+  assert.deepEqual(result.years, [2022, 2021, 2020])
+  assert.equal(result.summary.seasons, 62)
+  const films = filterDemoCatalog(items, { category: 'anime', page: 1, query: '', genre: '', year: '', origin: '', format: 'film', sort: 'recent', byYear: false })
+  assert.equal(films.total, 30)
 })

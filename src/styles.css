@@ -255,6 +255,13 @@ kbd { font-family: var(--body); font-size: 10px; font-weight: 700; color: var(--
 .year-group h2 { display: flex; align-items: baseline; gap: 12px; font-size: 28px; margin: 0 0 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .year-group h2 span { font-family: var(--body); font-size: 12px; color: var(--dim); letter-spacing: 0; }
 .load-more { display: flex; justify-content: center; padding: 34px 0 10px; }
+.catalog-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 30px 0 8px; }
+.pagination-pages { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.pagination-number { min-width: 38px; height: 38px; padding: 0 9px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); color: var(--muted); font-size: 13px; font-weight: 700; }
+.pagination-number:hover, .pagination-number.is-current { border-color: var(--accent); background: var(--accent); color: #111; }
+.pagination-ellipsis { width: 20px; text-align: center; color: var(--dim); }
+.pagination-step { min-height: 38px; }
+.pagination-step:disabled { opacity: .45; cursor: not-allowed; }
 .back-to-top { position: fixed; right: 20px; bottom: 92px; z-index: 30; width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--line-2); background: var(--surface-2); display: grid; place-items: center; box-shadow: 0 10px 30px #0008; }
 .back-to-top:hover { border-color: var(--accent); color: var(--accent); }
 .empty-state { min-height: 280px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 10px; padding: 40px 20px; border: 1px dashed var(--line-2); border-radius: 20px; color: var(--muted); }
@@ -748,6 +755,10 @@ kbd { font-family: var(--body); font-size: 10px; font-weight: 700; color: var(--
   .cart-bar > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; }
   .toast-stack { bottom: 80px; }
   .back-to-top { bottom: 84px; right: 12px; }
+  .catalog-pagination { gap: 7px; flex-wrap: wrap; }
+  .pagination-pages { gap: 4px; }
+  .pagination-number { min-width: 34px; height: 36px; padding: 0 6px; }
+  .pagination-step { padding-inline: 10px; min-height: 36px; }
   .kpi-grid, .session-facts, .scan-summary { grid-template-columns: 1fr 1fr; }
   .admin-main { padding: 20px 14px 80px; }
   .admin-card, .admin-panel { padding: 16px; }

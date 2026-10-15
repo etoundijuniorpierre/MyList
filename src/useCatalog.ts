@@ -1,23 +1,37 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
-import { fetchCatalogPages } from './catalogData'
+import { BROWSE_PAGE_SIZE, fetchCatalogPages, filterDemoCatalog, type CatalogBrowseResult } from './catalogData'
 import { routeCategory } from './display'
 import type { CatalogItem, Category } from './types'
 
 type Scope = Category | 'all'
 
-export function useCatalog(path: string, isAdmin: boolean, selection: string[], demo: CatalogItem[]) {
+export function useCatalog(path: string, search: string, isAdmin: boolean, selection: string[], demo: CatalogItem[]) {
   const [items, setItems] = useState<CatalogItem[]>(supabase ? [] : demo)
   const [ready, setReady] = useState<Set<string>>(new Set())
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [missing, setMissing] = useState<Set<string>>(new Set())
   const [cartPending, setCartPending] = useState(false)
   const [revision, setRevision] = useState(0)
+  const [browse, setBrowse] = useState<CatalogBrowseResult>({ items: [], total: 0, summary: { count: 0, seasons: 0, size: 0, genres: 0 }, years: [], genres: [] })
+  const [browseLoading, setBrowseLoading] = useState(false)
   const generation = useRef(0)
+  const lastAdmin = useRef(isAdmin)
   const complete = useRef(new Set<string>())
   const inFlight = useRef(new Map<string, Promise<void>>())
   const requested = useRef(new Set<string>())
+  const selectionRef = useRef(selection)
+  selectionRef.current = selection
   const scope: Scope | undefined = path === '/admin' && isAdmin ? 'all' : routeCategory[path === '/animes-mangas' ? '/animes' : path]
+  const params = new URLSearchParams(search)
+  const page = Math.max(1, Number.parseInt(params.get('page') ?? '1', 10) || 1)
+  const requestedSort = params.get('tri') ?? 'recent'
+  const pageQuery = {
+    category: scope && scope !== 'all' ? scope : 'series', page, query: (params.get('q') ?? '').trim(), genre: params.get('genre') ?? '',
+    year: params.get('annee') ?? '', origin: ['korean-drama', 'chinese-drama'].includes(params.get('origine') ?? '') ? params.get('origine')! : '',
+    format: ['series', 'film'].includes(params.get('format') ?? '') ? params.get('format')! : '',
+    sort: ['recent', 'az', 'za', 'year-desc', 'year-asc'].includes(requestedSort) ? requestedSort : 'recent', byYear: params.get('vue') === 'annees',
+  }
 
   function reset() {
     generation.current++
@@ -59,7 +73,8 @@ export function useCatalog(path: string, isAdmin: boolean, selection: string[], 
 
   // Le panier peut contenir des titres d'autres univers : on ne lit que ceux qui ne sont pas déjà chargés.
   const loadedIds = new Set(items.map(item => item.id))
-  const toFetch = selection.filter(id => !loadedIds.has(id) && !requested.current.has(id))
+  const requestedIds = [...new Set([...selection, params.get('titre')].filter((id): id is string => Boolean(id)))]
+  const toFetch = requestedIds.filter(id => !loadedIds.has(id) && !requested.current.has(id))
   const toFetchKey = toFetch.sort().join(',')
   useEffect(() => {
     if (!supabase || !toFetch.length) return
@@ -87,14 +102,48 @@ export function useCatalog(path: string, isAdmin: boolean, selection: string[], 
   }, [toFetchKey, revision])
 
   // A privilege change invalidates pending responses and cached admin-only rows.
-  useEffect(() => { reset() }, [isAdmin])
-  useEffect(() => { if (scope) void loadScope(scope) }, [scope, isAdmin, revision])
+  useEffect(() => {
+    if (lastAdmin.current !== isAdmin) { lastAdmin.current = isAdmin; reset() }
+  }, [isAdmin])
+  useEffect(() => { if (scope === 'all') void loadScope(scope) }, [scope, isAdmin, revision])
+  useEffect(() => {
+    if (!scope || scope === 'all') return
+    let cancelled = false
+    const version = generation.current
+    setBrowseLoading(true)
+    setErrors(current => { const next = { ...current }; delete next[scope]; return next })
+    void (async () => {
+      try {
+        let result: CatalogBrowseResult
+        if (!supabase) result = filterDemoCatalog(demo, pageQuery)
+        else {
+          const year = pageQuery.year && pageQuery.year !== 'inconnue' ? Number(pageQuery.year) : null
+          const { data, error } = await supabase.rpc('browse_catalog', {
+            p_category: scope, p_page: page, p_page_size: BROWSE_PAGE_SIZE, p_query: pageQuery.query || null,
+            p_genre: pageQuery.genre || null, p_year: Number.isInteger(year) ? year : null,
+            p_year_unknown: pageQuery.year === 'inconnue', p_origin: pageQuery.origin || null,
+            p_format: pageQuery.format || null, p_sort: pageQuery.sort, p_by_year: pageQuery.byYear,
+          })
+          if (error) throw error
+          result = data as CatalogBrowseResult
+        }
+        if (cancelled || generation.current !== version) return
+        setBrowse(result)
+        setItems(current => [...new Map([...current.filter(item => !(item.active && item.category === scope) || selectionRef.current.includes(item.id)), ...result.items].map(item => [item.id, item])).values()])
+      } catch (error) {
+        if (!cancelled && generation.current === version) setErrors(current => ({ ...current, [scope]: error instanceof Error ? error.message : 'Chargement impossible.' }))
+      } finally {
+        if (!cancelled && generation.current === version) setBrowseLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [scope, isAdmin, revision, page, pageQuery.query, pageQuery.genre, pageQuery.year, pageQuery.origin, pageQuery.format, pageQuery.sort, pageQuery.byYear])
 
   const error = scope ? errors[scope] ?? '' : ''
-  const loading = Boolean(supabase && scope && !ready.has(scope) && !ready.has('all') && !error)
+  const loading = Boolean(supabase && scope && (scope === 'all' ? !ready.has(scope) && !ready.has('all') : browseLoading) && !error)
   async function refresh() {
     reset()
-    if (scope) await loadScope(scope)
+    if (scope === 'all') await loadScope(scope)
   }
-  return { items, loading, error, refresh, cartPending: cartPending || Boolean(supabase && toFetch.length), missing }
+  return { items, browseItems: browse.items, browseTotal: browse.total, browseSummary: browse.summary, browseYears: browse.years, browseGenres: browse.genres, browsePage: page, browsePageSize: BROWSE_PAGE_SIZE, loading, error, refresh, cartPending: cartPending || Boolean(supabase && toFetch.length), missing }
 }

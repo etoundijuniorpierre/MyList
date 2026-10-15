@@ -56,7 +56,7 @@ function App() {
   const signingOut = useRef(false)
   const location = useLocation()
   const navigate = useNavigate()
-  const { items, loading, error: catalogError, refresh: reloadCatalog, cartPending, missing } = useCatalog(location.pathname, isAdmin, selection, demoItems)
+  const { items, browseItems, browseTotal, browseSummary, browseYears, browseGenres, browsePage, browsePageSize, loading, error: catalogError, refresh: reloadCatalog, cartPending, missing } = useCatalog(location.pathname, location.search, isAdmin, selection, demoItems)
 
   async function refreshSettings() {
     if (!supabase) return
@@ -257,7 +257,7 @@ function App() {
 
       <Suspense fallback={<PageLoading />}><Routes>
         <Route path="/" element={<HomePage demo={demoItems} />} />
-        {categories.map((category) => <Route key={category.key} path={categoryMeta[category.key].route} element={<CatalogPage category={category.key} loading={loading} />} />)}
+        {categories.map((category) => <Route key={category.key} path={categoryMeta[category.key].route} element={<CatalogPage category={category.key} loading={loading} items={browseItems} total={browseTotal} summary={browseSummary} years={browseYears} genres={browseGenres} page={browsePage} pageSize={browsePageSize} />} />)}
         <Route path="/animes-mangas" element={<Navigate to="/animes" replace />} />
         <Route path="/selection" element={<SelectionPage loading={cartPending || settingsLoading} />} />
         <Route path="/connexion" element={<AuthPage isAdmin={isAdmin} adminReady={adminReady} />} />
