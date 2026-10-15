@@ -29,6 +29,19 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
   const [search, setSearch] = useState(q)
   const deferred = useDeferredValue(search)
   const searchInput = useRef<HTMLInputElement>(null)
+  const listStart = useRef<HTMLDivElement>(null)
+  const paginationContext = JSON.stringify([category, q, genre, year, sort, byYear, origin, format])
+  const previousPagination = useRef({ context: paginationContext, page })
+
+  useEffect(() => {
+    const previous = previousPagination.current
+    previousPagination.current = { context: paginationContext, page }
+    // Seule une navigation entre pages repositionne la liste ; les filtres et
+    // les actualisations de fiches conservent la position de lecture.
+    if (previous.context === paginationContext && previous.page !== page) {
+      listStart.current?.scrollIntoView({ block: 'start', behavior: 'instant' })
+    }
+  }, [paginationContext, page])
 
   useEffect(() => { setPageMeta(label) }, [label])
   useEffect(() => { setSearch(q) }, [q])
@@ -81,6 +94,7 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
       </div>
     </section>
 
+    <div ref={listStart} aria-hidden="true" />
     <div className="catalog-toolbar" role="search">
       <div className="toolbar-row">
         <label className="search-field"><Search size={18} aria-hidden="true" /><span className="visually-hidden">Rechercher dans {label}</span><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder={`Rechercher parmi ${loading ? 'les' : summary.count.toLocaleString('fr-FR')} ${label.toLowerCase()}…`} type="search" enterKeyHint="search" />
