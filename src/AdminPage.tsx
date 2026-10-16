@@ -1,15 +1,15 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react'
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, Check, CircleAlert, FolderSearch, LayoutDashboard, ListChecks, ListPlus, LoaderCircle, LockKeyhole, MessageCircle, Plus, Search, ShieldCheck, Tags, X, Scale } from 'lucide-react'
 import type { User } from '@supabase/supabase-js'
 import { cachePosterUrl, isCachedPosterUrl, searchMetadata } from './metadata'
 import { scanFolder, type ScannedItem } from './folderScan'
 import { uniqueExactMatch } from './titleMatch'
-import { isCatalogNoiseTitle, mergeCatalogUpdate, planScanImport, sagaReplacements, sameCatalogTitle, unmatchedAnime, type ScanPlanEntry } from './catalogImport'
+import { isCatalogNoiseTitle, planScanImport, sagaReplacements, sameCatalogTitle, unmatchedAnime, type ScanPlanEntry } from './catalogImport'
 import { looksLikeSaga } from './admin/sagaPresets'
 import { itemPrice, validateGameTiers } from './pricing'
 import { isConfigured, supabase } from './supabase'
-import { Cover, formatPrice, safeUrl, translateSynopsisToFrench } from './media'
+import { Cover, formatPrice, translateSynopsisToFrench } from './media'
 import { plural, setPageMeta } from './display'
 import type { HealthIssue } from './titleHealth'
 import type { PosterJobKind } from './App'
@@ -20,9 +20,13 @@ import { CatalogTab } from './admin/CatalogTab'
 import { HealthTab } from './admin/HealthTab'
 import { ReviewTab, useReviewCount } from './admin/ReviewTab'
 import { SecurityTab } from './admin/SecurityTab'
+import { ItemSaveStatus } from './admin/ItemSaveStatus'
+import { itemWriteLocks, saveCatalogItem } from './admin/saveCatalogItem'
+import type { useItemSaves } from './admin/useItemSaves'
+import type { ItemSaveJob } from './admin/itemSaveQueue'
 import { categories, type CatalogItem, type Category, type GameCountDiscount, type GamePriceTier, type ItemInput, type MetadataResult, type PriceRule, type SiteSettings, titleKey } from './types'
 
-export default function AdminPage({ catalogLoading, user, isAdmin, authReady, items, prices, gameTiers, gameDiscount, settings, onChanged, onMerged, posterJobRunning, onRunPosterJob, idleMinutes, onIdleMinutes, onSignOut }: { catalogLoading: boolean; user: User | null; isAdmin: boolean; authReady: boolean; items: CatalogItem[]; prices: PriceRule[]; gameTiers: GamePriceTier[]; gameDiscount: GameCountDiscount; settings: SiteSettings; onChanged: () => Promise<void>; onMerged: (removedId: string, keptId: string) => void; posterJobRunning: boolean; onRunPosterJob: (kind: PosterJobKind, filter: Category | 'all', ids?: string[]) => Promise<void>; idleMinutes: number; onIdleMinutes: (minutes: number) => void; onSignOut: (reason: 'inactivite' | 'deconnexion', scope?: 'local' | 'global') => Promise<void> }) {
+export default function AdminPage({ catalogLoading, user, isAdmin, authReady, items, prices, gameTiers, gameDiscount, settings, saves, getItems, onCommit, onChanged, onMerged, posterJobRunning, onRunPosterJob, idleMinutes, onIdleMinutes, onSignOut }: { catalogLoading: boolean; user: User | null; isAdmin: boolean; authReady: boolean; items: CatalogItem[]; prices: PriceRule[]; gameTiers: GamePriceTier[]; gameDiscount: GameCountDiscount; settings: SiteSettings; saves: ReturnType<typeof useItemSaves>; getItems: () => CatalogItem[]; onCommit: (rows: CatalogItem[], removedIds?: string[]) => void; onChanged: () => Promise<void>; onMerged: (removedId: string, keptId: string) => void; posterJobRunning: boolean; onRunPosterJob: (kind: PosterJobKind, filter: Category | 'all', ids?: string[]) => Promise<void>; idleMinutes: number; onIdleMinutes: (minutes: number) => void; onSignOut: (reason: 'inactivite' | 'deconnexion', scope?: 'local' | 'global') => Promise<void> }) {
   const [tab, setTab] = useState<AdminTab>('overview')
   const [issueFilter, setIssueFilter] = useState<HealthIssue | ''>('')
   const [autoComplete, setAutoComplete] = useState(true)
@@ -50,6 +54,9 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
   const [discountPrice, setDiscountPrice] = useState(String(gameDiscount.price_per_game ?? ''))
   const [whatsappInput, setWhatsappInput] = useState(settings.whatsapp_number ? `+${settings.whatsapp_number}` : '')
   const [searchParams, setSearchParams] = useSearchParams()
+  const catalogSeen = useRef(false)
+  if (authReady && isAdmin && !catalogLoading) catalogSeen.current = true
+  const pendingIds = new Set(saves.pending.flatMap(job => job.locks.filter(key => key.startsWith('id:')).map(key => key.slice(3))))
   // Aperçu de l'import : chaque ligne scannée est rapprochée du catalogue avant toute écriture.
   const { count: reviewCount } = useReviewCount(items)
   const scanPlan = useMemo(() => planScanImport(scanned, items), [scanned, items])
@@ -107,61 +114,34 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
   if (!isConfigured) return <main className="interior-page"><div className="page-intro"><span className="eyebrow">Administration</span><h1>Espace admin</h1><p>Connectez Supabase pour activer la gestion sécurisée du catalogue.</p></div><div className="setup-card"><LockKeyhole size={28} /><h2>Configuration en attente</h2><p>Les accès et les données seront disponibles après la création du projet Supabase. Consultez le guide du projet pour les étapes.</p></div></main>
   if (!authReady) return <main className="interior-page"><div className="empty-state" role="status"><LoaderCircle className="spin" size={30} aria-hidden="true" /><h3>Vérification de la session…</h3></div></main>
   if (!user || !isAdmin) return <Navigate to="/connexion" replace />
-  if (catalogLoading) return <main className="interior-page"><div className="empty-state" role="status"><LoaderCircle className="spin" size={28} /><p>Chargement du catalogue administrateur…</p></div></main>
+  if (catalogLoading && !catalogSeen.current) return <main className="interior-page"><div className="empty-state" role="status"><LoaderCircle className="spin" size={28} /><p>Chargement du catalogue administrateur…</p></div></main>
 
   async function saveItem(input: ItemInput, id?: string, refresh = true): Promise<string | undefined> {
     if (!supabase) return
-    const clean: ItemInput = {
-      category: input.category,
-      media_type: input.category === 'anime' ? 'anime' : input.category === 'dramas' ? input.media_type : null,
-      media_format: input.category === 'anime' && input.media_format === 'film' ? 'film' : null,
-      title: input.title.trim(),
-      title_key: titleKey(input.category, input.category === 'anime' ? 'anime' : input.category === 'dramas' ? input.media_type : null, input.title, input.category === 'anime' ? input.media_format ?? null : null),
-      synopsis: input.synopsis?.trim() || null,
-      poster_url: safeUrl(input.poster_url) ?? null,
-      genres: input.genres,
-      year: input.year,
-      source: input.source,
-      source_id: input.source_id,
-      source_url: safeUrl(input.source_url) ?? null,
-      active: input.active,
-      seasons_count: input.category === 'games' ? null : input.seasons_count,
-      game_size_gb: input.category === 'games' ? input.game_size_gb : null,
-    }
-    if (!clean.title || isCatalogNoiseTitle(clean.title)) throw new Error('Le nom du dossier ne correspond pas à un titre exploitable.')
-    // Les index uniques de la base sont globaux, y compris entre catégories.
-    // Chercher la fiche propriétaire avant d'écrire évite de transformer le conflit SQL en message opaque.
-    const duplicate = items.find((item) => item.id !== id && (
-      item.title_key === clean.title_key || sameCatalogTitle(item, clean) ||
-      (clean.source_id && item.source === clean.source && item.source_id === clean.source_id)
-    ))
-    // En mode remplacement, conserver la fiche déjà propriétaire de la correspondance et
-    // fusionner l'ancienne fiche dedans. L'ancien code ciblait toujours `id`, puis supprimait
-    // ce même id : il pouvait donc échouer sur l'index unique ou effacer la fiche mise à jour.
-    const target = duplicate?.id ?? id
-    const existing = items.find((item) => item.id === target)
-    const edited = id ? items.find((item) => item.id === id) : undefined
-    const payload = { ...mergeCatalogUpdate(clean, existing, id && duplicate ? edited : undefined),
-      title: duplicate ? duplicate.title : existing ? existing.title : clean.title,
-      title_key: existing?.title_key ?? clean.title_key,
-    }
-    const response = target ? await supabase.from('catalog_items').update(payload).eq('id', target).select('id').single() : await supabase.from('catalog_items').insert(payload).select('id').single()
-    if (response.error) throw new Error(saveErrorMessage(response.error))
-    if (id && duplicate && duplicate.id !== id) {
-      const removed = await supabase.from('catalog_items').delete().eq('id', id).select('id').maybeSingle()
-      if (removed.error || !removed.data) {
-        await onChanged()
-        throw new Error(`La fiche existante « ${duplicate.title} » a été mise à jour, mais l’ancienne fiche n’a pas pu être retirée. Réessayez depuis le catalogue.`)
-      }
-      onMerged(id, response.data.id)
-    }
-    scheduleSavedEnrichment(response.data.id, payload.synopsis, payload.poster_url)
+    const item = await saveCatalogItem(supabase, input, id, getItems(), change => {
+      onCommit([change.item], change.removedIds)
+      change.removedIds.forEach(removed => onMerged(removed, change.item.id))
+    })
+    scheduleSavedEnrichment(item.id, item.synopsis, item.poster_url)
     if (refresh) {
-      await onChanged()
-      showSuccess(id && duplicate ? `« ${duplicate.title} » a été fusionnée avec la fiche sélectionnée.` : target ? 'Fiche mise à jour sans doublon.' : 'Titre ajouté au catalogue.')
-      setEditing(null); setSelectedResult(null); setManual(false)
+      showSuccess(`« ${item.title} » : fiche enregistrée.`)
     }
-    return response.data.id as string
+    return item.id
+  }
+  function submitIndependentSave(input: ItemInput) {
+    try {
+      const id = editing?.id
+      saves.queue.enqueue(input, id, itemWriteLocks(getItems(), input, id))
+      setEditing(null); setSelectedResult(null); setManual(false); setResults([]); setMessage('')
+      setTab('catalog')
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Enregistrement impossible.') }
+    return Promise.resolve()
+  }
+  function resumeFailedSave(job: ItemSaveJob) {
+    const existing = getItems().find(item => item.id === job.itemId)
+    if (job.itemId && !existing) { setMessage('La fiche d’origine n’existe plus. Vérifiez le catalogue avant de la recréer.'); return }
+    setEditing(existing ?? null); setSelectedResult(job.input); setCategory(job.input.category)
+    setManual(true); setTab('add'); setMessage(''); saves.queue.dismiss(job.key)
   }
   async function search(event: FormEvent) {
     event.preventDefault(); setBusy(true); setMessage(''); setResults([])
@@ -170,6 +150,7 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
     finally { setBusy(false) }
   }
   function startEdit(item: CatalogItem) {
+    if (pendingIds.has(item.id)) { setMessage(`« ${item.title} » est en cours d’enregistrement. Vous pouvez modifier une autre fiche.`); return }
     setEditing(item); setQuery(item.title); setResults([]); setSelectedResult(null); setCategory(item.category)
     if (item.media_type === 'chinese-drama' || item.media_type === 'korean-drama') setDramaOrigin(item.media_type)
     setTab('add'); setManual(true); setMessage('')
@@ -402,14 +383,15 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
       {nav.map((section) => <div className="admin-nav-group" key={section.group}><span>{section.group}</span>{section.tabs.map(([key, label, Icon, count]) => <button type="button" key={key} className={tab === key ? 'is-on' : ''} aria-current={tab === key ? 'page' : undefined} onClick={() => go(key)}><Icon size={17} aria-hidden="true" /><span>{label}</span>{count !== undefined && <small>{count.toLocaleString('fr-FR')}</small>}</button>)}</div>)}
     </aside>
     <div className="admin-main">
+    <ItemSaveStatus jobs={saves.jobs} onRetry={saves.queue.retry} onResume={resumeFailedSave} onDismiss={saves.queue.dismiss} />
     <div className="admin-head"><div><span className="eyebrow">Votre espace privé</span><h1>{nav.flatMap((section) => section.tabs).find(([key]) => key === tab)?.[1]}</h1></div></div>
     {message && <p className="admin-message" role="alert">{message}<button type="button" aria-label="Fermer le message" onClick={() => setMessage('')}><X size={15} /></button></p>}
     {tab === 'overview' && <Overview items={items} prices={prices} gameTiers={gameTiers} settings={settings} posterJobRunning={posterJobRunning} onGo={go} onComplete={() => void onRunPosterJob('complete', 'all')} />}
-    {tab === 'catalog' && <CatalogTab items={items} busy={busy} posterJobRunning={posterJobRunning} initialIssue={issueFilter} confirm={confirm} onEdit={startEdit} onChanged={onChanged} onMessage={report} onRunPosterJob={onRunPosterJob} />}
+    <div hidden={tab !== 'catalog'}><CatalogTab items={items} busy={busy} pendingIds={pendingIds} posterJobRunning={posterJobRunning} initialIssue={issueFilter} confirm={confirm} onEdit={startEdit} onChanged={onChanged} onMessage={report} onRunPosterJob={onRunPosterJob} /></div>
     {tab === 'review' && <ReviewTab items={items} posterJobRunning={posterJobRunning} onChanged={onChanged} onMessage={report} onEdit={startEdit} onRunPosterJob={onRunPosterJob} />}
     {tab === 'health' && <HealthTab items={items} posterJobRunning={posterJobRunning} confirm={confirm} onChanged={onChanged} onMessage={report} onEdit={startEdit} onShowIssue={(issue) => go('catalog', issue)} onRunPosterJob={onRunPosterJob} />}
     {tab === 'security' && user && <SecurityTab user={user} idleMinutes={idleMinutes} confirm={confirm} onIdleMinutes={onIdleMinutes} onSignOut={onSignOut} onMessage={report} />}
-    {tab === 'add' && <section className="admin-panel"><div className="admin-panel-head"><div><h2>{editing ? 'Modifier la fiche' : 'Ajouter un titre'}</h2><p>{editing ? 'Recherchez et choisissez une correspondance pour mettre à jour cette fiche.' : 'Recherchez une fiche pour récupérer son affiche et ses genres, ou remplissez-la à la main.'}</p></div></div>{!editing && <div className="admin-chooser"><label>Catégorie<select value={category} onChange={(event) => { setCategory(event.target.value as Category); setResults([]); setSelectedResult(null); setManual(false) }}>{categories.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}</select></label>{category === 'dramas' && <label>Origine<select value={dramaOrigin} onChange={(event) => setDramaOrigin(event.target.value as 'chinese-drama' | 'korean-drama')}><option value="chinese-drama">Chinois</option><option value="korean-drama">Coréen</option></select></label>}</div>}<form className="admin-search" onSubmit={search}><label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={editing ? `Rechercher une autre affiche pour ${editing.title}` : 'Nom de la série, du jeu, de l’animé ou de la novela...'} required minLength={2} /></label><button className="button-primary" disabled={busy}>{busy ? 'Recherche…' : 'Rechercher'} <ArrowRight size={17} /></button></form>{!editing && <button className="text-button" onClick={() => { setManual(!manual); setSelectedResult(null); setResults([]) }}>{manual ? 'Fermer la saisie manuelle' : 'Saisir une fiche manuellement'}</button>}{results.length > 0 && <div className="metadata-results">{results.map((result) => { const existing = items.find((item) => item.title_key === result.title_key || (item.category === result.category && item.source === result.source && item.source_id === result.source_id)); const exists = Boolean(existing); const selected = editing ? { ...result, category: editing.category, media_type: editing.media_type, media_format: editing.media_format ?? null, title: editing.title, title_key: editing.title_key, seasons_count: editing.seasons_count ?? result.seasons_count, game_size_gb: editing.game_size_gb ?? result.game_size_gb, active: editing.active } : { ...result, media_type: category === 'dramas' ? dramaOrigin : result.media_type, title_key: titleKey(result.category, category === 'dramas' ? dramaOrigin : result.media_type, result.title), seasons_count: existing?.seasons_count ?? result.seasons_count, game_size_gb: existing?.game_size_gb ?? result.game_size_gb }; return <div className="metadata-row" key={`${result.source}-${result.source_id}`}><Cover item={result} /><div><strong>{result.title}</strong><span>{result.year ?? '—'} · {result.genres.slice(0, 3).join(', ') || 'Genre inconnu'} · {result.source}</span>{exists && <small>Déjà dans la liste : les informations seront actualisées.</small>}</div><button onClick={() => { setSelectedResult(selected); setManual(true); setMessage('') }} disabled={busy}>{editing ? 'Choisir cette correspondance' : exists ? 'Compléter et mettre à jour' : 'Compléter et ajouter'} <Plus size={16} /></button></div> })}</div>}{(manual || editing) && <ManualForm key={`${editing?.id ?? 'new'}:${selectedResult ? `${selectedResult.source}:${selectedResult.source_id}:${selectedResult.title}` : category}`} initial={selectedResult ?? editing} category={category} prices={prices} gameTiers={gameTiers} gameDiscount={gameDiscount} busy={busy} onCancel={() => { setManual(false); setEditing(null); setSelectedResult(null) }} onSave={async (input) => { setBusy(true); try { await saveItem(input, editing?.id) } catch (error) { setMessage(error instanceof Error ? error.message : 'Enregistrement impossible.') } finally { setBusy(false) } }} />}</section>}
+    {tab === 'add' && <section className="admin-panel"><div className="admin-panel-head"><div><h2>{editing ? 'Modifier la fiche' : 'Ajouter un titre'}</h2><p>{editing ? 'Recherchez et choisissez une correspondance pour mettre à jour cette fiche.' : 'Recherchez une fiche pour récupérer son affiche et ses genres, ou remplissez-la à la main.'}</p></div></div>{!editing && <div className="admin-chooser"><label>Catégorie<select value={category} onChange={(event) => { setCategory(event.target.value as Category); setResults([]); setSelectedResult(null); setManual(false) }}>{categories.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}</select></label>{category === 'dramas' && <label>Origine<select value={dramaOrigin} onChange={(event) => setDramaOrigin(event.target.value as 'chinese-drama' | 'korean-drama')}><option value="chinese-drama">Chinois</option><option value="korean-drama">Coréen</option></select></label>}</div>}<form className="admin-search" onSubmit={search}><label className="search-field"><Search size={18} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={editing ? `Rechercher une autre affiche pour ${editing.title}` : 'Nom de la série, du jeu, de l’animé ou de la novela...'} required minLength={2} /></label><button className="button-primary" disabled={busy}>{busy ? 'Recherche…' : 'Rechercher'} <ArrowRight size={17} /></button></form>{!editing && <button className="text-button" onClick={() => { setManual(!manual); setSelectedResult(null); setResults([]) }}>{manual ? 'Fermer la saisie manuelle' : 'Saisir une fiche manuellement'}</button>}{results.length > 0 && <div className="metadata-results">{results.map((result) => { const existing = items.find((item) => item.title_key === result.title_key || (item.category === result.category && item.source === result.source && item.source_id === result.source_id)); const exists = Boolean(existing); const selected = editing ? { ...result, category: editing.category, media_type: editing.media_type, media_format: editing.media_format ?? null, title: editing.title, title_key: editing.title_key, seasons_count: editing.seasons_count ?? result.seasons_count, game_size_gb: editing.game_size_gb ?? result.game_size_gb, active: editing.active } : { ...result, media_type: category === 'dramas' ? dramaOrigin : result.media_type, title_key: titleKey(result.category, category === 'dramas' ? dramaOrigin : result.media_type, result.title), seasons_count: existing?.seasons_count ?? result.seasons_count, game_size_gb: existing?.game_size_gb ?? result.game_size_gb }; return <div className="metadata-row" key={`${result.source}-${result.source_id}`}><Cover item={result} /><div><strong>{result.title}</strong><span>{result.year ?? '—'} · {result.genres.slice(0, 3).join(', ') || 'Genre inconnu'} · {result.source}</span>{exists && <small>Déjà dans la liste : les informations seront actualisées.</small>}</div><button onClick={() => { setSelectedResult(selected); setManual(true); setMessage('') }} disabled={busy}>{editing ? 'Choisir cette correspondance' : exists ? 'Compléter et mettre à jour' : 'Compléter et ajouter'} <Plus size={16} /></button></div> })}</div>}{(manual || editing) && <ManualForm key={`${editing?.id ?? 'new'}:${selectedResult ? `${selectedResult.source}:${selectedResult.source_id}:${selectedResult.title}` : category}`} initial={selectedResult ?? editing} category={category} prices={prices} gameTiers={gameTiers} gameDiscount={gameDiscount} busy={busy} onCancel={() => { setManual(false); setEditing(null); setSelectedResult(null) }} onSave={submitIndependentSave} />}</section>}
     {tab === 'bulk' && <section className="admin-panel"><div className="admin-panel-head"><div><h2>Importer une liste</h2><p>Un titre par ligne, jusqu’à 30. Vérifiez les correspondances avant l’ajout.</p></div></div><div className="admin-chooser"><label>Catégorie<select value={category} onChange={(event) => setCategory(event.target.value as Category)}>{categories.map((entry) => <option key={entry.key} value={entry.key}>{entry.label}</option>)}</select></label>{category === 'dramas' && <label>Origine des titres<select value={dramaOrigin} onChange={(event) => setDramaOrigin(event.target.value as 'chinese-drama' | 'korean-drama')}><option value="chinese-drama">Chinois</option><option value="korean-drama">Coréen</option></select></label>}</div><textarea className="bulk-textarea" value={bulkText} onChange={(event) => setBulkText(event.target.value)} placeholder={'Breaking Bad\nThe Last of Us\nDark'} rows={7} /><div className="bulk-actions"><button className="button-primary" onClick={() => void previewBulk()} disabled={busy || !bulkText.trim()}>{busy ? 'Recherche en cours…' : 'Prévisualiser les fiches'} <Search size={17} /></button></div>{bulkResults.length > 0 && <div className="bulk-preview"><h3>Vérification avant import</h3>{bulkResults.map((row, index) => <label className="bulk-row" key={`${row.query}-${index}`}><input type="checkbox" checked={row.selected} disabled={!row.result} onChange={(event) => setBulkResults((current) => current.map((entry, i) => i === index ? { ...entry, selected: event.target.checked } : entry))} /><span><strong>{row.query}</strong><small>{row.result ? `→ ${row.result.title} · ${row.result.match ? row.result.match === 'exact' ? 'Correspondance exacte' : 'À vérifier' : 'Sans fiche externe'}${row.error ? ` · ${row.error}` : ''}` : row.error ?? 'Aucun résultat'}</small></span></label>)}<button className="button-primary" onClick={() => void importBulk()} disabled={busy || !bulkResults.some((row) => row.selected)}>Enregistrer les fiches cochées <ArrowRight size={17} /></button></div>}</section>}
     {tab === 'scan' && <section className="admin-panel"><div className="admin-panel-head"><div><h2>Scanner un disque ou un dossier</h2><p>Choisissez un dossier ou la racine d’un disque. Seuls les noms, tailles et chemins sont lus, localement ; aucun fichier n’est envoyé.</p></div></div>
       <label className="scan-picker"><FolderSearch size={20} aria-hidden="true" /> Choisir un dossier<input type="file" multiple {...{ webkitdirectory: '' }} onChange={scanSelected} disabled={busy} /></label>
@@ -446,14 +428,6 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
     {tab === 'settings' && <section className="admin-panel"><div className="admin-panel-head"><div><h2>Réception WhatsApp</h2><p>Ce numéro recevra les paniers envoyés par les visiteurs. Vous pouvez le modifier ici à tout moment.</p></div></div><form onSubmit={saveSettings} className="price-form"><label>Numéro international<input type="tel" inputMode="tel" autoComplete="tel" value={whatsappInput} onChange={(event) => setWhatsappInput(event.target.value)} placeholder="+2348012345678" maxLength={16} /></label><p className="scan-help">Incluez l’indicatif du pays. Aucun message ne sera envoyé tant que le numéro est vide.</p><button className="button-primary" disabled={busy}>Enregistrer le numéro <Check size={17} /></button></form></section>}
     </div>
   </main>
-}
-
-function saveErrorMessage(error: unknown): string {
-  const issue = error as { code?: string; message?: string; details?: string; hint?: string }
-  const reason = [issue?.message, issue?.details, issue?.hint].filter(Boolean).join(' — ')
-  if (issue?.code === '23505') return `Cette fiche entre en conflit avec un titre ou une correspondance déjà enregistrée. Détail Supabase : ${reason || 'contrainte unique'}`
-  if (issue?.code === '42501' || issue?.code === 'PGRST301') return `Supabase a refusé la modification pour cette session. Vérifiez les droits administrateur. ${reason}`.trim()
-  return reason ? `Enregistrement impossible : ${reason}` : 'Enregistrement impossible. Supabase n’a pas fourni de détail exploitable.'
 }
 
 function ManualForm({ initial, category, prices, gameTiers, gameDiscount, busy, onSave, onCancel }: { initial: ItemInput | null; category: Category; prices: PriceRule[]; gameTiers: GamePriceTier[]; gameDiscount: GameCountDiscount; busy: boolean; onSave: (input: ItemInput) => Promise<void>; onCancel: () => void }) {

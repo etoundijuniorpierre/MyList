@@ -18,6 +18,8 @@ import { SelectionPage } from './site/SelectionPage'
 import { AuthPage } from './site/AuthPage'
 import { SearchPalette } from './site/SearchPalette'
 import { scrollPageForNavigation } from './catalogScroll'
+import { useItemSaves } from './admin/useItemSaves'
+import { confirmedCatalogItem } from './catalogMutations'
 const AdminPage = lazy(() => import('./AdminPage'))
 
 const demoItems: CatalogItem[] = [
@@ -61,7 +63,7 @@ function App() {
   const location = useLocation()
   const previousPath = useRef(location.pathname)
   const navigate = useNavigate()
-  const { items, rememberItem, browseItems, browseTotal, browseSummary, browseYears, browseGenres, browsePage, browsePageSize, loading, error: catalogError, refresh: reloadCatalog, cartPending, missing } = useCatalog(location.pathname, location.search, isAdmin, selection, demoItems)
+  const { items, rememberItem, getItems, commitItems, browseItems, browseTotal, browseSummary, browseYears, browseGenres, browsePage, browsePageSize, loading, error: catalogError, refresh: reloadCatalog, cartPending, missing } = useCatalog(location.pathname, location.search, isAdmin, selection, demoItems)
 
   async function refreshSettings(): Promise<PricingSettings | null> {
     if (!supabase) return { prices, gameTiers, gameDiscount, settings }
@@ -176,7 +178,18 @@ function App() {
       navigate(`/connexion?raison=${reason}`, { replace: true })
     }
   }, [navigate])
-  const idle = useIdleLogout(isAdmin, posterJobRunning, idleMinutes, () => void signOut('inactivite'))
+  const itemSaves = useItemSaves({
+    owner: isAdmin ? user?.id ?? null : null,
+    getItems,
+    commit: change => {
+      const item = confirmedCatalogItem(getItems(), change.item, change.field, change.expected)
+      if (!item) return
+      commitItems([item], change.removedIds)
+      change.removedIds.forEach(id => remapSelection(id, change.item.id))
+    },
+    notify: text => notify(text),
+  })
+  const idle = useIdleLogout(isAdmin, posterJobRunning || itemSaves.pending.length > 0, idleMinutes, () => void signOut('inactivite'))
 
   useEffect(() => { try { localStorage.setItem('mylist-selection', JSON.stringify(selection)) } catch { /* Le panier reste en mémoire. */ } }, [selection])
   // Un titre retiré du catalogue disparaît aussi des paniers enregistrés.
@@ -258,6 +271,7 @@ function App() {
       </header>
 
       {!isConfigured && <div className="demo-banner"><Sparkles size={15} aria-hidden="true" /><span>Mode démonstration : les fiches affichées sont des exemples.</span></div>}
+      {isAdmin && path !== '/admin' && itemSaves.pending.length > 0 && <div className="demo-banner" role="status"><LoaderCircle className="spin" size={15} /><span>{itemSaves.pending.length} enregistrement(s) en cours.</span><Link to="/admin">Voir le suivi</Link></div>}
       {(loadError || catalogError) && <div className="error-banner" role="alert"><span>{isAdmin ? `Chargement impossible : ${loadError || catalogError}` : 'Le catalogue est momentanément indisponible.'}</span><button type="button" onClick={() => void refreshCatalog()}>Réessayer</button></div>}
       {isAdmin && posterJob && <div className={`poster-job ${posterJob.error ? 'has-error' : posterJob.result ? 'is-complete' : ''}`} role="status" aria-live="polite">
         {posterJobRunning && <LoaderCircle className="spin" size={20} aria-hidden="true" />}
@@ -277,7 +291,7 @@ function App() {
         <Route path="/animes-mangas" element={<Navigate to="/animes" replace />} />
         <Route path="/selection" element={<SelectionPage loading={cartPending || settingsLoading} pricingError={loadError} onVerifyPricing={refreshSettings} />} />
         <Route path="/connexion" element={<AuthPage isAdmin={isAdmin} adminReady={adminReady} />} />
-        <Route path="/admin" element={<AdminPage catalogLoading={loading || settingsLoading} user={user} isAdmin={isAdmin} authReady={authReady && adminReady} items={items} prices={prices} gameTiers={gameTiers} gameDiscount={gameDiscount} settings={settings} onChanged={refreshCatalog} onMerged={remapSelection} posterJobRunning={posterJobRunning} onRunPosterJob={runPosterJob} idleMinutes={idleMinutes} onIdleMinutes={setIdleMinutes} onSignOut={signOut} />} />
+        <Route path="/admin" element={<AdminPage catalogLoading={loading || settingsLoading} user={user} isAdmin={isAdmin} authReady={authReady && adminReady} items={items} prices={prices} gameTiers={gameTiers} gameDiscount={gameDiscount} settings={settings} saves={itemSaves} getItems={getItems} onCommit={commitItems} onChanged={refreshCatalog} onMerged={remapSelection} posterJobRunning={posterJobRunning} onRunPosterJob={runPosterJob} idleMinutes={idleMinutes} onIdleMinutes={setIdleMinutes} onSignOut={signOut} />} />
         <Route path="*" element={<NotFound />} />
       </Routes></Suspense>
 

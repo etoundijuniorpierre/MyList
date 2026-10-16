@@ -2,6 +2,8 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { titleHue } from './display'
 import { supabase } from './supabase'
 import { categoryLabel, type CatalogItem } from './types'
+import { safeUrl } from './urls'
+export { safeUrl } from './urls'
 
 export function formatPrice(amount: number, currency: string) {
   try { return new Intl.NumberFormat('fr-FR', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount) }
@@ -15,12 +17,6 @@ const sourceNames: Record<string, string> = {
 export function sourceLabel(source: string, posterUrl: string | null) {
   if (source === 'wikipedia') return posterUrl ? 'Image : Wikimedia Commons' : 'Source : Wikipédia'
   return `Source : ${sourceNames[source] ?? source}`
-}
-
-export function safeUrl(url: string | null) {
-  if (!url) return undefined
-  try { const parsed = new URL(url); return parsed.protocol === 'https:' ? parsed.href : undefined }
-  catch { return undefined }
 }
 
 export async function translateSynopsisToFrench(synopsis: string | null) {

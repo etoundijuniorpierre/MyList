@@ -3,11 +3,16 @@ import { supabase } from './supabase'
 import { BROWSE_PAGE_SIZE, catalogSort, fetchCatalogPages, filterDemoCatalog, mergeBrowseItems, type CatalogBrowseResult } from './catalogData'
 import { routeCategory } from './display'
 import type { CatalogItem, Category } from './types'
+import { applyCatalogRows, reconcileCatalogRows, type CatalogMutation } from './catalogMutations'
 
 type Scope = Category | 'all'
 
 export function useCatalog(path: string, search: string, isAdmin: boolean, selection: string[], demo: CatalogItem[]) {
   const [items, setItems] = useState<CatalogItem[]>(supabase ? [] : demo)
+  const itemsRef = useRef(items)
+  itemsRef.current = items
+  const mutations = useRef(new Map<string, CatalogMutation>())
+  const mutationSequence = useRef(0)
   const [ready, setReady] = useState<Set<string>>(new Set())
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [missing, setMissing] = useState<Set<string>>(new Set())
@@ -40,11 +45,22 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
   const rememberItem = useCallback((item: CatalogItem) => {
     setItems(current => [...new Map([...current, item].map(row => [row.id, row])).values()])
   }, [])
+  const getItems = useCallback(() => itemsRef.current, [])
+  const commitItems = useCallback((rows: CatalogItem[], removedIds: string[] = []) => {
+    const sequence = ++mutationSequence.current
+    rows.forEach(item => mutations.current.set(item.id, { sequence, item }))
+    removedIds.forEach(id => mutations.current.set(id, { sequence, item: null }))
+    itemsRef.current = applyCatalogRows(itemsRef.current, rows, removedIds)
+    setItems(current => applyCatalogRows(current, rows, removedIds))
+    browseCache.current.clear()
+    setRevision(value => value + 1)
+  }, [])
 
   function reset() {
     generation.current++
     complete.current.clear(); inFlight.current.clear(); requested.current.clear()
     browseCache.current.clear()
+    mutations.current.clear()
     setItems(supabase ? [] : demo); setReady(new Set()); setErrors({}); setMissing(new Set())
     setRevision(value => value + 1)
   }
@@ -54,11 +70,12 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
     const pending = inFlight.current.get(key)
     if (pending) return pending
     const version = generation.current
+    const sequence = mutationSequence.current
     const task = (async () => {
       try {
         const rows = await fetchRows()
         if (generation.current !== version || (key !== 'all' && complete.current.has('all'))) return
-        setItems(current => [...new Map([...current.filter(item => !replace(item)), ...rows].map(item => [item.id, item])).values()])
+        setItems(current => reconcileCatalogRows([...new Map([...current.filter(item => !replace(item)), ...rows].map(item => [item.id, item])).values()], mutations.current, sequence))
         complete.current.add(key)
         setReady(new Set(complete.current))
         setErrors(current => { const next = { ...current }; delete next[key]; return next })
@@ -88,6 +105,7 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
   useEffect(() => {
     if (!supabase || !toFetch.length) return
     const version = generation.current
+    const sequence = mutationSequence.current
     toFetch.forEach(id => requested.current.add(id))
     setCartPending(true)
     void (async () => {
@@ -100,7 +118,7 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
         }
         if (generation.current !== version) return
         const found = new Set(rows.map(row => row.id))
-        setItems(current => [...new Map([...current, ...rows].map(item => [item.id, item])).values()])
+        setItems(current => reconcileCatalogRows([...new Map([...current, ...rows].map(item => [item.id, item])).values()], mutations.current, sequence))
         setMissing(current => new Set([...current, ...toFetch.filter(id => !found.has(id))]))
       } catch {
         toFetch.forEach(id => requested.current.delete(id))
@@ -120,6 +138,7 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
     let cancelled = false
     const controller = new AbortController()
     const version = generation.current
+    const sequence = mutationSequence.current
     const cached = browseCache.current.get(currentBrowseKey)
     function display(result: CatalogBrowseResult) {
       setBrowse(result)
@@ -151,7 +170,7 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
           if (error) throw error
           result = data as CatalogBrowseResult
         }
-        if (cancelled || generation.current !== version) return
+        if (cancelled || generation.current !== version || mutationSequence.current !== sequence) return
         browseCache.current.delete(currentBrowseKey)
         browseCache.current.set(currentBrowseKey, { result, expiresAt: Date.now() + 60_000 })
         if (browseCache.current.size > 20) browseCache.current.delete(browseCache.current.keys().next().value!)
@@ -168,8 +187,16 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
   const error = scope ? errors[scope] ?? '' : ''
   const loading = Boolean(scope && (scope === 'all' ? supabase && !ready.has('all') : browseLoading || displayedBrowseKey !== currentBrowseKey) && !error)
   async function refresh() {
-    reset()
-    if (scope === 'all') await loadScope(scope)
+    if (scope === 'all') {
+      // Garder les données affichées pendant une synchronisation administrateur.
+      generation.current++
+      complete.current.clear(); inFlight.current.clear(); requested.current.clear()
+      browseCache.current.clear()
+      await loadScope(scope)
+    } else {
+      browseCache.current.clear()
+      setRevision(value => value + 1)
+    }
   }
-  return { items, rememberItem, browseItems: browse.items, browseTotal: browse.total, browseSummary: browse.summary, browseYears: browse.years, browseGenres: browse.genres, browsePage: page, browsePageSize: BROWSE_PAGE_SIZE, loading, error, refresh, cartPending: cartPending || Boolean(supabase && toFetch.length), missing }
+  return { items, rememberItem, getItems, commitItems, browseItems: browse.items, browseTotal: browse.total, browseSummary: browse.summary, browseYears: browse.years, browseGenres: browse.genres, browsePage: page, browsePageSize: BROWSE_PAGE_SIZE, loading, error, refresh, cartPending: cartPending || Boolean(supabase && toFetch.length), missing }
 }

@@ -16,6 +16,7 @@ type Sort = 'recent' | 'az' | 'old'
 interface Props {
   items: CatalogItem[]
   busy: boolean
+  pendingIds: Set<string>
   posterJobRunning: boolean
   initialIssue: HealthIssue | ''
   confirm: Confirm
@@ -25,7 +26,7 @@ interface Props {
   onRunPosterJob: (kind: PosterJobKind, filter: Category | 'all', ids?: string[]) => Promise<void>
 }
 
-export function CatalogTab({ items, busy, posterJobRunning, initialIssue, confirm, onEdit, onChanged, onMessage, onRunPosterJob }: Props) {
+export function CatalogTab({ items, busy, pendingIds, posterJobRunning, initialIssue, confirm, onEdit, onChanged, onMessage, onRunPosterJob }: Props) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<Category | 'all'>('all')
   const [status, setStatus] = useState<Status>('all')
@@ -61,6 +62,7 @@ export function CatalogTab({ items, busy, posterJobRunning, initialIssue, confir
   }
   async function setActive(ids: string[], active: boolean) {
     if (!supabase || !ids.length) return
+    if (ids.some(id => pendingIds.has(id))) { onMessage('Une fiche sélectionnée est en cours d’enregistrement. Attendez sa confirmation.'); return }
     setWorking(true)
     try {
       await inChunks(ids, (chunk) => supabase!.from('catalog_items').update({ active }).in('id', chunk))
@@ -71,6 +73,7 @@ export function CatalogTab({ items, busy, posterJobRunning, initialIssue, confir
   }
   async function remove(list: CatalogItem[]) {
     if (!supabase || !list.length) return
+    if (list.some(item => pendingIds.has(item.id))) { onMessage('Une fiche sélectionnée est en cours d’enregistrement. Attendez sa confirmation.'); return }
     const ok = await confirm(list.length === 1
       ? { title: 'Supprimer ce titre ?', body: `« ${list[0].title} » sera retiré définitivement du catalogue. Pour le cacher sans le perdre, utilisez plutôt « Masquer ».`, confirm: 'Supprimer', danger: true }
       : { title: `Supprimer ${list.length} titres ?`, body: 'Cette suppression est définitive. Exportez une sauvegarde avant si vous avez un doute.', confirm: 'Supprimer définitivement', danger: true, typed: 'SUPPRIMER' })
@@ -126,6 +129,7 @@ export function CatalogTab({ items, busy, posterJobRunning, initialIssue, confir
       {visible.length > 0 && <label className="admin-row admin-row-head"><input type="checkbox" checked={allVisibleChecked} onChange={(event) => setChecked((value) => { const next = new Set(value); visible.forEach((item) => event.target.checked ? next.add(item.id) : next.delete(item.id)); return next })} /> <span>Sélectionner la page</span>{filtered.length > visible.length && <button type="button" className="text-button" onClick={() => setChecked(new Set(filtered.map((item) => item.id)))}>Sélectionner les {filtered.length.toLocaleString('fr-FR')}</button>}</label>}
       {visible.map((item) => {
         const problems = issuesById.get(item.id) ?? []
+        const saving = pendingIds.has(item.id)
         return <div className={`admin-row ${item.active ? '' : 'is-hidden'}`} role="listitem" key={item.id}>
           <input type="checkbox" aria-label={`Sélectionner ${item.title}`} checked={checked.has(item.id)} onChange={(event) => setChecked((value) => { const next = new Set(value); event.target.checked ? next.add(item.id) : next.delete(item.id); return next })} />
           <Cover item={item} sizes="52px" />
@@ -136,10 +140,10 @@ export function CatalogTab({ items, busy, posterJobRunning, initialIssue, confir
           </div>
           <span className={`status-badge ${item.active ? 'is-on' : ''}`}>{item.active ? 'Publié' : 'Masqué'}</span>
           <div className="admin-row-actions">
-            <button type="button" onClick={() => onEdit(item)}>Modifier</button>
-            <button type="button" disabled={disabled} onClick={() => void setActive([item.id], !item.active)}>{item.active ? 'Masquer' : 'Publier'}</button>
+            <button type="button" disabled={saving} onClick={() => onEdit(item)}>{saving ? 'Enregistrement…' : 'Modifier'}</button>
+            <button type="button" disabled={disabled || saving} onClick={() => void setActive([item.id], !item.active)}>{item.active ? 'Masquer' : 'Publier'}</button>
             <a href={`${categoryMeta[item.category].route}?titre=${encodeURIComponent(item.id)}`} target="_blank" rel="noopener" aria-label={`Voir ${item.title} sur le site`}><Eye size={15} /></a>
-            <button type="button" className="danger-text" disabled={disabled} aria-label={`Supprimer ${item.title}`} onClick={() => void remove([item])}><Trash2 size={16} /></button>
+            <button type="button" className="danger-text" disabled={disabled || saving} aria-label={`Supprimer ${item.title}`} onClick={() => void remove([item])}><Trash2 size={16} /></button>
           </div>
         </div>
       })}
