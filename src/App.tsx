@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowRight, Check, Heart, LoaderCircle, LockKeyhole, LogOut, Menu, Search, ShieldCheck, Sparkles, Timer, X } from 'lucide-react'
 import type { User } from '@supabase/supabase-js'
@@ -50,13 +51,15 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [toastHost, setToastHost] = useState<HTMLElement | null>(null)
+  const toastHosts = useRef<Array<{ host: HTMLElement }>>([])
   const [idleMinutes, setIdleMinutes] = useState(readIdleMinutes)
   const [cartBump, setCartBump] = useState(0)
   const authUserId = useRef<string | null>(null)
   const signingOut = useRef(false)
   const location = useLocation()
   const navigate = useNavigate()
-  const { items, browseItems, browseTotal, browseSummary, browseYears, browseGenres, browsePage, browsePageSize, loading, error: catalogError, refresh: reloadCatalog, cartPending, missing } = useCatalog(location.pathname, location.search, isAdmin, selection, demoItems)
+  const { items, rememberItem, browseItems, browseTotal, browseSummary, browseYears, browseGenres, browsePage, browsePageSize, loading, error: catalogError, refresh: reloadCatalog, cartPending, missing } = useCatalog(location.pathname, location.search, isAdmin, selection, demoItems)
 
   async function refreshSettings(): Promise<PricingSettings | null> {
     if (!supabase) return { prices, gameTiers, gameDiscount, settings }
@@ -185,6 +188,15 @@ function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  const registerToastHost = useCallback((host: HTMLElement) => {
+    const entry = { host }
+    toastHosts.current.push(entry)
+    setToastHost(host)
+    return () => {
+      toastHosts.current = toastHosts.current.filter(current => current !== entry)
+      setToastHost(toastHosts.current.at(-1)?.host ?? null)
+    }
+  }, [])
   const notify = useCallback((text: string, action?: Toast['action']) => {
     const id = Date.now() + Math.random()
     setToasts(current => [...current.slice(-2), { id, text, action }])
@@ -213,7 +225,7 @@ function App() {
 
   const site: SiteState = {
     items, selection, selectedItems, toggle, clearSelection: () => setSelection([]),
-    prices, gameTiers, gameDiscount, settings, isAdmin, openSearch: () => setSearchOpen(true), notify,
+    prices, gameTiers, gameDiscount, settings, isAdmin, openSearch: () => setSearchOpen(true), notify, registerToastHost,
   }
   const path = location.pathname
   const inAdmin = path === '/admin' || path === '/connexion'
@@ -268,14 +280,14 @@ function App() {
         <span className="cart-bar-cta">Voir le panier <ArrowRight size={16} aria-hidden="true" /></span>
       </Link>}
 
-      <div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div className="toast" key={toast.id}><Check size={16} aria-hidden="true" /><span>{toast.text}</span>{toast.action && <button type="button" onClick={() => { toast.action!.run(); setToasts(current => current.filter(entry => entry.id !== toast.id)) }}>{toast.action.label}</button>}</div>)}</div>
+      {createPortal(<div className="toast-stack" aria-live="polite">{toasts.map((toast) => <div className="toast" key={toast.id}><Check size={16} aria-hidden="true" /><span>{toast.text}</span>{toast.action && <button type="button" onClick={() => { toast.action!.run(); setToasts(current => current.filter(entry => entry.id !== toast.id)) }}>{toast.action.label}</button>}</div>)}</div>, toastHost ?? document.body)}
 
       {idle.secondsLeft !== null && <div className="idle-warning" role="alertdialog" aria-labelledby="idle-title" aria-describedby="idle-copy">
         <div className="idle-box"><Timer size={26} aria-hidden="true" /><h2 id="idle-title">Toujours là ?</h2><p id="idle-copy">Par sécurité, la session admin se fermera dans <strong>{idle.secondsLeft} s</strong>.</p>
           <div className="idle-actions"><button type="button" className="button-primary" onClick={idle.stayActive} autoFocus>Rester connecté</button><button type="button" className="button-ghost" onClick={() => void signOut('deconnexion')}>Se déconnecter</button></div></div>
       </div>}
 
-      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} demo={demoItems} />
+      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} onChoose={rememberItem} demo={demoItems} />
 
       {!inAdmin && <footer className="site-footer">
         <div className="footer-brand-block"><span className="footer-brand">MA LISTE<span>.</span></span><p>Votre prochaine découverte commence ici.</p></div>

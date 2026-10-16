@@ -9,10 +9,11 @@ import { DetailDialog } from './DetailDialog'
 import { MediaCard, SkeletonGrid } from './MediaCard'
 import { useLightweightDisplay } from '../useLightweightDisplay'
 import { StaticPosterBackdrop } from './StaticPosterBackdrop'
+import { catalogSort, DEFAULT_CATALOG_SORT, type CatalogSort } from '../catalogData'
+import { scrollCatalogStart } from '../catalogScroll'
 
-type Sort = 'recent' | 'az' | 'za' | 'year-desc' | 'year-asc'
-const sortLabels: Record<Sort, string> = { recent: 'Ajouts récents', az: 'Titre A → Z', za: 'Titre Z → A', 'year-desc': 'Plus récents d’abord', 'year-asc': 'Plus anciens d’abord' }
-type SearchParamsSetter = ReturnType<typeof useSearchParams>[1]
+type Sort = CatalogSort
+const sortLabels: Record<Sort, string> = { 'year-desc': 'Année de sortie ↓', 'year-asc': 'Année de sortie ↑', az: 'Titre A → Z', za: 'Titre Z → A', recent: 'Derniers ajouts au catalogue' }
 
 export function CatalogPage({ category, loading, items: pageItems, total, summary, years, genres, page, pageSize }: { category: Category; loading: boolean; items: CatalogItem[]; total: number; summary: { count: number; seasons: number; size: number; genres: number }; years: number[]; genres: Array<{ name: string; count: number }>; page: number; pageSize: number }) {
   const { items, selection, toggle, isAdmin, prices, gameTiers, gameDiscount } = useSite()
@@ -23,7 +24,7 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
   const q = params.get('q') ?? ''
   const genre = params.get('genre') ?? ''
   const year = params.get('annee') ?? ''
-  const sort = (params.get('tri') as Sort) in sortLabels ? params.get('tri') as Sort : 'recent'
+  const sort = catalogSort(params.get('tri'))
   const byYear = params.get('vue') === 'annees'
   const origin = params.get('origine') ?? ''
   const format = params.get('format') ?? ''
@@ -35,16 +36,34 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
   const listStart = useRef<HTMLDivElement>(null)
   const paginationContext = JSON.stringify([category, q, genre, year, sort, byYear, origin, format])
   const previousPagination = useRef({ context: paginationContext, page })
+  const paginationRequested = useRef(false)
+  const changePage = useCallback((nextPage: number) => {
+    if (nextPage === page) return
+    paginationRequested.current = true
+    scrollCatalogStart(listStart.current)
+    setParams(current => {
+      const next = new URLSearchParams(current)
+      if (nextPage <= 1) next.delete('page'); else next.set('page', String(nextPage))
+      return next
+    }, { replace: false })
+  }, [page, setParams])
 
   useEffect(() => {
     const previous = previousPagination.current
     previousPagination.current = { context: paginationContext, page }
-    // Seule une navigation entre pages repositionne la liste ; les filtres et
-    // les actualisations de fiches conservent la position de lecture.
+    if (previous.context !== paginationContext) { paginationRequested.current = false; return }
     if (previous.context === paginationContext && previous.page !== page) {
-      listStart.current?.scrollIntoView({ block: 'start', behavior: 'instant' })
+      paginationRequested.current = true
     }
-  }, [paginationContext, page])
+    // Répéter après le chargement évite que l'ancrage mobile annule le saut.
+    if (paginationRequested.current && !loading) {
+      const frame = window.requestAnimationFrame(() => {
+        scrollCatalogStart(listStart.current)
+        paginationRequested.current = false
+      })
+      return () => window.cancelAnimationFrame(frame)
+    }
+  }, [paginationContext, page, loading])
 
   useEffect(() => { setPageMeta(label) }, [label])
   useEffect(() => {
@@ -76,10 +95,10 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const catalog = useMemo(() => [...new Map([...items.filter(item => item.active && item.category === category), ...pageItems].map(item => [item.id, item])).values()], [items, pageItems, category])
+  const catalog = useMemo(() => [...new Map([...items, ...pageItems].filter(item => item.active && item.category === category).map(item => [item.id, item])).values()], [items, pageItems, category])
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const pageNumbers = paginationWindow(page, pageCount)
-  const active = Boolean(q || genre || year || origin || format || sort !== 'recent' || byYear)
+  const active = Boolean(q || genre || year || origin || format || sort !== DEFAULT_CATALOG_SORT || byYear)
   const detail = openId ? catalog.find(item => item.id === openId) ?? null : null
   const openItem = useCallback((item: CatalogItem) => update({ titre: item.id }, false), [update])
   const navigateItem = useCallback((item: CatalogItem) => update({ titre: item.id }), [update])
@@ -107,14 +126,14 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
       </div>
     </section>
 
-    <div ref={listStart} aria-hidden="true" />
+    <div ref={listStart} className="catalog-list-start" aria-hidden="true" />
     <div className="catalog-toolbar" role="search">
       <div className="toolbar-row">
         <label className="search-field"><Search size={18} aria-hidden="true" /><span className="visually-hidden">Rechercher dans {label}</span><input ref={searchInput} value={search} onChange={event => setSearch(event.target.value)} placeholder={`Rechercher parmi ${loading ? 'les' : summary.count.toLocaleString('fr-FR')} ${label.toLowerCase()}…`} type="search" enterKeyHint="search" />
           {search ? <button type="button" className="field-clear" onClick={() => setSearch('')} aria-label="Effacer la recherche"><X size={15} /></button> : <kbd aria-hidden="true">/</kbd>}
         </label>
         <label className="select-field"><span className="visually-hidden">Année de sortie</span><select value={year} onChange={event => update({ annee: event.target.value || null })}><option value="">Toutes les années</option>{years.map(value => <option key={value} value={value}>{value}</option>)}<option value="inconnue">Année inconnue</option></select></label>
-        <label className="select-field"><span className="visually-hidden">Trier</span><select value={sort} onChange={event => update({ tri: event.target.value === 'recent' ? null : event.target.value })}>{Object.entries(sortLabels).map(([key, text]) => <option key={key} value={key}>{text}</option>)}</select></label>
+        <label className="select-field"><span className="visually-hidden">Trier</span><select value={sort} onChange={event => update({ tri: event.target.value === DEFAULT_CATALOG_SORT ? null : event.target.value })}>{Object.entries(sortLabels).map(([key, text]) => <option key={key} value={key}>{text}</option>)}</select></label>
         <button type="button" className={`toggle ${byYear ? 'is-on' : ''}`} aria-pressed={byYear} onClick={() => update({ vue: byYear ? null : 'annees' })}>Par année</button>
       </div>
       <div className="toolbar-row toolbar-chips">
@@ -138,20 +157,16 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
         : <div className="card-grid">{pageItems.map((item, index) => <MediaCard key={item.id} item={item} priority={index < 6} selected={selection.includes(item.id)} onOpen={openItem} onToggle={toggle} onEdit={isAdmin ? edit : undefined} />)}</div>
         : <div className="empty-state"><Search size={28} aria-hidden="true" /><h2>{summary.count ? 'Aucun titre ne correspond' : 'Cet univers arrive bientôt'}</h2><p>{summary.count ? 'Essayez un autre mot ou retirez un filtre.' : 'Les premiers titres seront bientôt ajoutés.'}</p>{active && <button type="button" className="button-ghost" onClick={() => { setSearch(''); setParams(openId ? { titre: openId } : {}, { replace: true }) }}>Voir tout le catalogue</button>}</div>}
       {total > pageSize && <nav className="catalog-pagination" aria-label="Pagination du catalogue">
-        <button type="button" className="button-ghost pagination-step" disabled={page <= 1} onClick={() => changePage(page - 1, setParams)} aria-label="Page précédente">Précédent</button>
-        <div className="pagination-pages">{pageNumbers.map((entry, index) => entry === '…' ? <span className="pagination-ellipsis" key={`ellipsis-${index}`} aria-hidden="true">…</span> : <button type="button" key={entry} className={`pagination-number ${entry === page ? 'is-current' : ''}`} aria-label={`Page ${entry}`} aria-current={entry === page ? 'page' : undefined} onClick={() => changePage(entry, setParams)}>{entry}</button>)}</div>
-        <button type="button" className="button-ghost pagination-step" disabled={page >= pageCount} onClick={() => changePage(page + 1, setParams)} aria-label="Page suivante">Suivant</button>
+        <button type="button" className="button-ghost pagination-step" disabled={page <= 1} onClick={() => changePage(page - 1)} aria-label="Page précédente">Précédent</button>
+        <div className="pagination-pages">{pageNumbers.map((entry, index) => entry === '…' ? <span className="pagination-ellipsis" key={`ellipsis-${index}`} aria-hidden="true">…</span> : <button type="button" key={entry} className={`pagination-number ${entry === page ? 'is-current' : ''}`} aria-label={`Page ${entry}`} aria-current={entry === page ? 'page' : undefined} onClick={() => changePage(entry)}>{entry}</button>)}</div>
+        <button type="button" className="button-ghost pagination-step" disabled={page >= pageCount} onClick={() => changePage(page + 1)} aria-label="Page suivante">Suivant</button>
       </nav>}
       {page > 1 && <button type="button" className="back-to-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Revenir en haut"><ArrowUp size={18} /></button>}
     </section>
 
     <section className="other-universes" aria-labelledby="other-title"><h2 id="other-title">Changer d’univers</h2><div className="universe-links">{categories.filter(entry => entry.key !== category).map(entry => <Link key={entry.key} to={categoryMeta[entry.key].route} style={{ '--accent': categoryMeta[entry.key].accent } as CSSProperties}><span>{entry.label}</span><small>{categoryMeta[entry.key].tagline}</small><ArrowRight size={17} aria-hidden="true" /></Link>)}</div></section>
-    <DetailDialog item={detail} list={pageItems.length ? pageItems : catalog} onNavigate={navigateItem} onClose={closeItem} onEdit={isAdmin ? edit : undefined} />
+    <DetailDialog item={detail} list={catalog} onNavigate={navigateItem} onClose={closeItem} onEdit={isAdmin ? edit : undefined} />
   </main>
-}
-
-function changePage(page: number, setParams: SearchParamsSetter) {
-  setParams(current => { const next = new URLSearchParams(current); if (page <= 1) next.delete('page'); else next.set('page', String(page)); return next }, { replace: false })
 }
 
 function paginationWindow(page: number, pages: number): Array<number | '…'> {

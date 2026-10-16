@@ -16,6 +16,7 @@ export interface SiteState {
   isAdmin: boolean
   openSearch: () => void
   notify: (text: string, action?: Toast['action']) => void
+  registerToastHost: (host: HTMLElement) => () => void
 }
 
 export const SiteContext = createContext<SiteState | null>(null)

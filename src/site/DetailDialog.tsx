@@ -5,6 +5,7 @@ import { itemPrice } from '../pricing'
 import { categoryMeta, kindLabel, measureLabel } from '../display'
 import type { CatalogItem } from '../types'
 import { useSite } from './context'
+import { isDialogDismissal, syncModal } from '../dialogState'
 
 interface Props {
   item: CatalogItem | null
@@ -16,13 +17,9 @@ interface Props {
 
 export function DetailDialog({ item, list, onNavigate, onClose, onEdit }: Props) {
   const dialog = useRef<HTMLDialogElement>(null)
-  const { selection, toggle, prices, gameTiers, gameDiscount } = useSite()
-  useEffect(() => {
-    const element = dialog.current
-    if (!element) return
-    if (item && !element.open) element.showModal()
-    if (!item && element.open) element.close()
-  }, [item])
+  const { selection, toggle, prices, gameTiers, gameDiscount, registerToastHost } = useSite()
+  const hasItem = Boolean(item)
+  useEffect(() => syncModal(dialog.current, hasItem, registerToastHost), [hasItem, registerToastHost])
   const index = item ? list.findIndex((entry) => entry.id === item.id) : -1
   const previous = index > 0 ? list[index - 1] : null
   const next = index >= 0 && index < list.length - 1 ? list[index + 1] : null
@@ -47,7 +44,7 @@ export function DetailDialog({ item, list, onNavigate, onClose, onEdit }: Props)
   const price = item ? itemPrice(item, [item], prices, gameTiers, gameDiscount) : null
   const backdrop = item ? safeUrl(item.poster_url) : undefined
   const meta = item ? categoryMeta[item.category] : null
-  return <dialog className="detail-dialog" ref={dialog} aria-labelledby="detail-title" onClose={onClose} onClick={(event) => { if (event.target === dialog.current) onClose() }}>
+  return <dialog className="detail-dialog" ref={dialog} aria-labelledby="detail-title" onCancel={event => { event.preventDefault(); onClose() }} onClose={() => { if (isDialogDismissal(dialog.current, hasItem)) onClose() }} onClick={(event) => { if (event.target === dialog.current) onClose() }}>
     {item && meta && <div className="detail-content" style={{ '--accent': meta.accent } as CSSProperties}>
       {backdrop && <div className="detail-backdrop" style={{ backgroundImage: `url("${backdrop.replace(/"/g, '%22')}")` }} aria-hidden="true" />}
       <button type="button" className="detail-close" onClick={onClose} aria-label="Fermer la fiche"><X size={20} /></button>

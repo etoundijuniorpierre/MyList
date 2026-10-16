@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
-import { BROWSE_PAGE_SIZE, fetchCatalogPages, filterDemoCatalog, type CatalogBrowseResult } from './catalogData'
+import { BROWSE_PAGE_SIZE, catalogSort, fetchCatalogPages, filterDemoCatalog, mergeBrowseItems, type CatalogBrowseResult } from './catalogData'
 import { routeCategory } from './display'
 import type { CatalogItem, Category } from './types'
 
@@ -15,6 +15,7 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
   const [revision, setRevision] = useState(0)
   const [browse, setBrowse] = useState<CatalogBrowseResult>({ items: [], total: 0, summary: { count: 0, seasons: 0, size: 0, genres: 0 }, years: [], genres: [] })
   const [browseLoading, setBrowseLoading] = useState(false)
+  const [displayedBrowseKey, setDisplayedBrowseKey] = useState('')
   const browseCache = useRef(new Map<string, { result: CatalogBrowseResult; expiresAt: number }>())
   const generation = useRef(0)
   const lastAdmin = useRef(isAdmin)
@@ -26,14 +27,19 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
   const scope: Scope | undefined = path === '/admin' && isAdmin ? 'all' : routeCategory[path === '/animes-mangas' ? '/animes' : path]
   const params = new URLSearchParams(search)
   const page = Math.max(1, Number.parseInt(params.get('page') ?? '1', 10) || 1)
-  const requestedSort = params.get('tri') ?? 'recent'
+  const openId = params.get('titre')
+  const openIdRef = useRef(openId)
+  openIdRef.current = openId
   const pageQuery = {
     category: scope && scope !== 'all' ? scope : 'series', page, query: (params.get('q') ?? '').trim(), genre: params.get('genre') ?? '',
     year: params.get('annee') ?? '', origin: ['korean-drama', 'chinese-drama'].includes(params.get('origine') ?? '') ? params.get('origine')! : '',
     format: ['series', 'film'].includes(params.get('format') ?? '') ? params.get('format')! : '',
-    sort: ['recent', 'az', 'za', 'year-desc', 'year-asc'].includes(requestedSort) ? requestedSort : 'recent', byYear: params.get('vue') === 'annees',
+    sort: catalogSort(params.get('tri')), byYear: params.get('vue') === 'annees',
   }
   const currentBrowseKey = JSON.stringify([scope, pageQuery.page, pageQuery.query, pageQuery.genre, pageQuery.year, pageQuery.origin, pageQuery.format, pageQuery.sort, pageQuery.byYear])
+  const rememberItem = useCallback((item: CatalogItem) => {
+    setItems(current => [...new Map([...current, item].map(row => [row.id, row])).values()])
+  }, [])
 
   function reset() {
     generation.current++
@@ -117,7 +123,8 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
     const cached = browseCache.current.get(currentBrowseKey)
     function display(result: CatalogBrowseResult) {
       setBrowse(result)
-      setItems(current => [...new Map([...current.filter(item => complete.current.has('all') || !(item.active && item.category === scope) || selectionRef.current.includes(item.id)), ...result.items].map(item => [item.id, item])).values()])
+      setDisplayedBrowseKey(currentBrowseKey)
+      setItems(current => mergeBrowseItems(current, result.items, scope as Category, selectionRef.current, openIdRef.current, complete.current.has('all')))
     }
     if (cached) {
       display(cached.result)
@@ -159,10 +166,10 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
   }, [scope, isAdmin, revision, page, pageQuery.query, pageQuery.genre, pageQuery.year, pageQuery.origin, pageQuery.format, pageQuery.sort, pageQuery.byYear, currentBrowseKey])
 
   const error = scope ? errors[scope] ?? '' : ''
-  const loading = Boolean(supabase && scope && (scope === 'all' ? !ready.has(scope) && !ready.has('all') : browseLoading) && !error)
+  const loading = Boolean(scope && (scope === 'all' ? supabase && !ready.has('all') : browseLoading || displayedBrowseKey !== currentBrowseKey) && !error)
   async function refresh() {
     reset()
     if (scope === 'all') await loadScope(scope)
   }
-  return { items, browseItems: browse.items, browseTotal: browse.total, browseSummary: browse.summary, browseYears: browse.years, browseGenres: browse.genres, browsePage: page, browsePageSize: BROWSE_PAGE_SIZE, loading, error, refresh, cartPending: cartPending || Boolean(supabase && toFetch.length), missing }
+  return { items, rememberItem, browseItems: browse.items, browseTotal: browse.total, browseSummary: browse.summary, browseYears: browse.years, browseGenres: browse.genres, browsePage: page, browsePageSize: BROWSE_PAGE_SIZE, loading, error, refresh, cartPending: cartPending || Boolean(supabase && toFetch.length), missing }
 }

@@ -10,13 +10,13 @@ import { useLightweightDisplay } from '../useLightweightDisplay'
 import { StaticPosterBackdrop } from './StaticPosterBackdrop'
 
 export function HomePage({ demo }: { demo: CatalogItem[] }) {
-  const { shelves, error } = useHomeData(demo)
+  const { shelves, error, releaseYear } = useHomeData(demo)
   const { openSearch, selection } = useSite()
   const lightweight = useLightweightDisplay()
   useEffect(() => { setPageMeta('') }, [])
   const total = shelves?.reduce((sum, shelf) => sum + shelf.count, 0) ?? 0
-  const posters = shelves?.flatMap((shelf) => shelf.latest) ?? []
-  const mobilePosters = shelves?.flatMap(shelf => shelf.latest.find(item => item.poster_url) ?? []) ?? []
+  const posters = shelves?.flatMap((shelf) => [...new Map([...shelf.latest, ...shelf.featured].map(item => [item.id, item])).values()]) ?? []
+  const mobilePosters = shelves?.flatMap(shelf => shelf.featured[0] ?? []) ?? []
   // Trois bandes d'affiches qui défilent en sens opposés : la vitrine du vidéo-club.
   const rows = [0, 1, 2].map((row) => posters.filter((_, index) => index % 3 === row))
 
@@ -45,7 +45,7 @@ export function HomePage({ demo }: { demo: CatalogItem[] }) {
           const shelf = shelves?.find((value) => value.category === entry.key)
           const meta = categoryMeta[entry.key]
           return <Link key={entry.key} to={meta.route} className="portal" style={{ '--accent': meta.accent, '--glow': meta.glow } as CSSProperties}>
-            <div className="portal-stack" aria-hidden="true">{shelf?.latest.slice(0, 3).map((item) => <Cover key={item.id} item={item} sizes="140px" />)}</div>
+            <div className="portal-stack" aria-hidden="true">{shelf?.featured.map((item) => <Cover key={item.id} item={item} sizes="140px" />)}</div>
             <div className="portal-copy"><span className="portal-number">{entry.number}</span><h3>{entry.label}</h3><p>{meta.tagline}</p><span className="portal-count">{shelf ? plural(shelf.count, 'titre') : '…'} <ArrowRight size={16} aria-hidden="true" /></span></div>
           </Link>
         })}
@@ -56,10 +56,12 @@ export function HomePage({ demo }: { demo: CatalogItem[] }) {
       const meta = categoryMeta[shelf.category]
       const label = categories.find((entry) => entry.key === shelf.category)!.label
       return <section className="rail" key={shelf.category} aria-labelledby={`rail-${shelf.category}`} style={{ '--accent': meta.accent } as CSSProperties}>
-        <div className="rail-head"><h2 id={`rail-${shelf.category}`}><span>Nouveautés</span> {label}</h2><Link to={meta.route}>Tout voir <ArrowRight size={16} aria-hidden="true" /></Link></div>
+        <div className="rail-head"><h2 id={`rail-${shelf.category}`}><span>Nouveautés {releaseYear}</span> {label}</h2><Link to={`${meta.route}?annee=${releaseYear}`}>Tout voir <ArrowRight size={16} aria-hidden="true" /></Link></div>
         <div className="rail-track">{shelf.latest.slice(0, 12).map((item) => <Link key={item.id} to={`${meta.route}?titre=${encodeURIComponent(item.id)}`} className="rail-card"><Cover item={item} sizes="180px" /><span className="rail-title">{item.title}</span><span className="rail-meta">{kindLabel(item)}{item.year ? ` · ${item.year}` : ''}</span></Link>)}</div>
       </section>
     })}
+
+    {shelves && shelves.every(shelf => !shelf.latest.length) && <p className="release-empty">Aucune sortie de {releaseYear} n’est disponible pour le moment. Retrouvez tous les titres dans les univers ci-dessus.</p>}
 
     <section className="steps" aria-labelledby="steps-title">
       <div className="section-head"><span className="eyebrow">Simple comme un générique</span><h2 id="steps-title">Comment ça marche&nbsp;?</h2></div>

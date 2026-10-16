@@ -5,11 +5,13 @@ import { supabase } from '../supabase'
 import { Cover } from '../media'
 import { categoryMeta, kindLabel, measureLabel } from '../display'
 import { normalizeTitle, type CatalogItem } from '../types'
+import { useSite } from './context'
+import { syncModal } from '../dialogState'
 
 const columns = 'id,category,media_type,media_format,title,title_key,synopsis,poster_url,genres,year,source,source_id,source_url,active,seasons_count,game_size_gb'
 
 /** Recherche globale (Ctrl + K) dans les cinq univers, interrogée côté serveur pour ne pas charger tout le catalogue. */
-export function SearchPalette({ open, onClose, demo }: { open: boolean; onClose: () => void; demo: CatalogItem[] }) {
+export function SearchPalette({ open, onClose, onChoose, demo }: { open: boolean; onClose: () => void; onChoose: (item: CatalogItem) => void; demo: CatalogItem[] }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const input = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
@@ -17,31 +19,40 @@ export function SearchPalette({ open, onClose, demo }: { open: boolean; onClose:
   const [results, setResults] = useState<CatalogItem[]>([])
   const [busy, setBusy] = useState(false)
   const [active, setActive] = useState(0)
+  const { registerToastHost } = useSite()
   useEffect(() => {
     const element = dialog.current
     if (!element) return
-    if (open && !element.open) { element.showModal(); setTimeout(() => input.current?.focus(), 0) }
-    if (!open && element.open) element.close()
-  }, [open])
+    const unregister = syncModal(element, open, registerToastHost)
+    if (open) {
+      const focusTimer = window.setTimeout(() => input.current?.focus(), 0)
+      return () => { window.clearTimeout(focusTimer); unregister?.() }
+    }
+  }, [open, registerToastHost])
   useEffect(() => {
     const term = query.trim()
     setActive(0)
-    if (term.length < 2) { setResults([]); return }
+    if (!open || term.length < 2) { setResults([]); setBusy(false); return }
     if (!supabase) { setResults(demo.filter((item) => normalizeTitle(item.title).includes(normalizeTitle(term))).slice(0, 10)); return }
     let cancelled = false
+    const controller = new AbortController()
     setBusy(true)
     const timer = window.setTimeout(async () => {
       const pattern = `%${term.replace(/[\\%_]/g, (char) => `\\${char}`)}%`
-      const { data } = await supabase!.from('catalog_items').select(columns).eq('active', true).ilike('title', pattern).order('title').limit(14)
+      const { data } = await supabase!.from('catalog_items').select(columns).eq('active', true).ilike('title', pattern).order('title').limit(14).abortSignal(controller.signal)
       if (!cancelled) { setResults((data ?? []) as CatalogItem[]); setBusy(false) }
     }, 180)
-    return () => { cancelled = true; window.clearTimeout(timer) }
-  }, [query])
+    return () => { cancelled = true; window.clearTimeout(timer); controller.abort() }
+  }, [query, open, demo])
   function go(item: CatalogItem) {
+    // Fermer la recherche native avant d'ouvrir la fiche et garder son résultat
+    // en mémoire même si elle ne figure pas sur la première page du catalogue.
+    dialog.current?.close()
+    onChoose(item)
     onClose()
     navigate(`${categoryMeta[item.category].route}?titre=${encodeURIComponent(item.id)}`)
   }
-  return <dialog className="search-palette" ref={dialog} aria-label="Rechercher un titre" onClose={() => { onClose(); setQuery('') }} onClick={(event) => { if (event.target === dialog.current) onClose() }}>
+  return <dialog className="search-palette" ref={dialog} aria-label="Rechercher un titre" onCancel={event => { event.preventDefault(); onClose() }} onClose={() => { if (!dialog.current?.open) { onClose(); setQuery('') } }} onClick={(event) => { if (event.target === dialog.current) onClose() }}>
     <div className="palette-box">
       <label className="palette-field"><Search size={20} aria-hidden="true" /><span className="visually-hidden">Titre recherché</span>
         <input ref={input} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Une série, un jeu, un animé…" role="combobox" aria-expanded={results.length > 0} aria-controls="palette-results" aria-activedescendant={results[active] ? `palette-${results[active].id}` : undefined}
