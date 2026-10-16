@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowRight, Check, Heart, LoaderCircle, LockKeyhole, LogOut, Menu, Search, ShieldCheck, Sparkles, Timer, X } from 'lucide-react'
@@ -17,6 +17,7 @@ import { CatalogPage } from './site/CatalogPage'
 import { SelectionPage } from './site/SelectionPage'
 import { AuthPage } from './site/AuthPage'
 import { SearchPalette } from './site/SearchPalette'
+import { scrollPageForNavigation } from './catalogScroll'
 const AdminPage = lazy(() => import('./AdminPage'))
 
 const demoItems: CatalogItem[] = [
@@ -58,6 +59,7 @@ function App() {
   const authUserId = useRef<string | null>(null)
   const signingOut = useRef(false)
   const location = useLocation()
+  const previousPath = useRef(location.pathname)
   const navigate = useNavigate()
   const { items, rememberItem, browseItems, browseTotal, browseSummary, browseYears, browseGenres, browsePage, browsePageSize, loading, error: catalogError, refresh: reloadCatalog, cartPending, missing } = useCatalog(location.pathname, location.search, isAdmin, selection, demoItems)
 
@@ -180,6 +182,11 @@ function App() {
   // Un titre retiré du catalogue disparaît aussi des paniers enregistrés.
   useEffect(() => { if (missing.size) setSelection(current => current.filter(id => !missing.has(id))) }, [missing])
   useEffect(() => { setMenuOpen(false); setSearchOpen(false) }, [location.pathname])
+  useLayoutEffect(() => {
+    const from = previousPath.current
+    previousPath.current = location.pathname
+    return scrollPageForNavigation(from, location)
+  }, [location.pathname, location.hash])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearchOpen(true) }

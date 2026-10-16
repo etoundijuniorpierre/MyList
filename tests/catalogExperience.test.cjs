@@ -9,7 +9,7 @@ require.extensions['.ts'] = (module, filename) => {
 }
 const { catalogSort, filterDemoCatalog, mergeBrowseItems } = require('../src/catalogData.ts')
 const { currentReleaseYear, makeHomeShelf, demoHomeShelves } = require('../src/homeData.ts')
-const { scrollCatalogStart } = require('../src/catalogScroll.ts')
+const { scrollCatalogStart, scrollPageForNavigation } = require('../src/catalogScroll.ts')
 const { isDialogDismissal, syncModal } = require('../src/dialogState.ts')
 const item = (id, extra = {}) => ({ id, title: id, active: true, category: 'games', genres: [], poster_url: `https://example.com/${id}.webp`, year: null, ...extra })
 
@@ -83,6 +83,31 @@ test('la remontée mobile vise le début de liste sous l’en-tête, avant et ap
     scrollCatalogStart(null)
     assert.equal(moves.length, 2)
   } finally { global.window = oldWindow; global.document = oldDocument }
+})
+
+test('changer d’univers remonte tout en haut, sans déplacer les filtres, la pagination ou les ancres', () => {
+  const oldWindow = global.window
+  const moves = []
+  let afterRender
+  let cancelled = false
+  global.window = {
+    scrollTo(options) { moves.push(options) },
+    requestAnimationFrame(callback) { afterRender = callback; return 1 },
+    cancelAnimationFrame(id) { cancelled = id === 1 },
+  }
+  try {
+    const cleanup = scrollPageForNavigation('/jeux-pc', { pathname: '/animes', hash: '' })
+    assert.deepEqual(moves, [{ top: 0, left: 0, behavior: 'instant' }])
+    afterRender()
+    assert.equal(moves.length, 2)
+    cleanup()
+    assert.equal(cancelled, true)
+    for (const search of ['?page=2', '?q=naruto', '?titre=fiche', '?year=2025']) {
+      assert.equal(scrollPageForNavigation('/animes', { pathname: '/animes', hash: '', search }), undefined)
+    }
+    assert.equal(scrollPageForNavigation('/animes', { pathname: '/', hash: '#univers' }), undefined)
+    assert.equal(moves.length, 2)
+  } finally { global.window = oldWindow }
 })
 
 test('la notification est enregistrée dans la modale native après son ouverture', () => {
