@@ -20,6 +20,7 @@ import { SearchPalette } from './site/SearchPalette'
 import { scrollPageForNavigation } from './catalogScroll'
 import { useItemSaves } from './admin/useItemSaves'
 import { confirmedCatalogItem } from './catalogMutations'
+import { needsCompletion } from './metadataDecisions'
 const AdminPage = lazy(() => import('./AdminPage'))
 
 const demoItems: CatalogItem[] = [
@@ -121,7 +122,7 @@ function App() {
       ? item.category === 'games' && Boolean(item.poster_url)
       : kind === 'translate' ? Boolean(item.synopsis?.trim())
       : (filter === 'all' || item.category === filter) && (kind === 'cache' ? Boolean(item.poster_url && !isCachedPosterUrl(item.poster_url))
-        : kind === 'complete' ? !item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year : !item.poster_url)).map(item => item.id)
+        : kind === 'complete' ? needsCompletion(item) : !item.poster_url)).map(item => item.id)
     if (!ids.length) return
     const labels: Record<PosterJobKind, string> = { cache: 'Affiches à conserver', 'repair-games': 'Tri initial des jaquettes de jeux', enrich: 'Affiches manquantes à rechercher', complete: 'Compléter les fiches (affiches, descriptions, saisons)', translate: 'Traduire les descriptions en français' }
     const job: PosterJob = { version: 1, id: crypto.randomUUID(), userId: user.id, kind, ids, ...(kind === 'repair-games' ? { phase: 'scan' as const, candidateIds: [] } : {}), total: ids.length, completed: 0, updated: 0, stored: 0, missing: 0, label: labels[kind] }

@@ -9,6 +9,7 @@ import type { PosterJobKind } from '../App'
 import type { Confirm } from './useConfirm'
 import { catalogIdentity } from '../catalogImport'
 import { formatWorks, isNoiseEntry, looksLikeSaga, parseWorks, sagaPreset } from './sagaPresets'
+import { needsCompletion, requireDecisionStorage } from '../metadataDecisions'
 
 const SAGA_IGNORED_KEY = 'mylist-saga-ignored'
 function readIgnored() { try { return new Set<string>(JSON.parse(localStorage.getItem(SAGA_IGNORED_KEY) ?? '[]')) } catch { return new Set<string>() } }
@@ -18,26 +19,27 @@ interface Props {
   posterJobRunning: boolean
   confirm: Confirm
   onChanged: () => Promise<void>
+  onUpdated: (item: CatalogItem) => void
   onMessage: (text: string, success?: boolean) => void
   onEdit: (item: CatalogItem) => void
   onShowIssue: (issue: HealthIssue) => void
   onRunPosterJob: (kind: PosterJobKind, filter: Category | 'all', ids?: string[]) => Promise<void>
 }
 
-export function HealthTab({ items, posterJobRunning, confirm, onChanged, onMessage, onEdit, onShowIssue, onRunPosterJob }: Props) {
+export function HealthTab({ items, posterJobRunning, confirm, onChanged, onUpdated, onMessage, onEdit, onShowIssue, onRunPosterJob }: Props) {
   const suggestions = useMemo(() => items.map((item) => ({ item, suggestion: suggestTitle(item) })).filter((entry): entry is { item: CatalogItem; suggestion: NonNullable<ReturnType<typeof suggestTitle>> } => Boolean(entry.suggestion)), [items])
   const duplicates = useMemo(() => probableDuplicates(items), [items])
   const counts = useMemo(() => {
-    const result: Record<HealthIssue, number> = { poster: 0, synopsis: 0, genres: 0, year: 0, measure: 0, title: 0 }
+    const result: Record<HealthIssue, number> = { poster: 0, synopsis: 0, genres: 0, year: 0, measure: 0, title: 0, seasons: 0 }
     for (const item of items) for (const issue of itemIssues(item)) result[issue]++
     return result
   }, [items])
   const [edits, setEdits] = useState<Record<string, string>>({})
-  const [skipped, setSkipped] = useState<Set<string>>(new Set())
   const [working, setWorking] = useState(false)
   const [shown, setShown] = useState(40)
-  const pending = suggestions.filter(({ item }) => !skipped.has(item.id))
-  const incomplete = items.filter((item) => !item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year)
+  const pending = suggestions
+  const incomplete = items.filter(needsCompletion)
+  const acceptedTitles = items.filter(item => item.metadata_preferences?.title === item.title)
   const translatable = items.filter((item) => Boolean(item.synopsis?.trim()))
   const [ignoredSagas, setIgnoredSagas] = useState(readIgnored)
   const [sagaTexts, setSagaTexts] = useState<Record<string, string>>({})
@@ -112,24 +114,37 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onMessa
     } finally { setWorking(false) }
   }
 
-  async function rename(list: { item: CatalogItem; suggestion: NonNullable<ReturnType<typeof suggestTitle>> }[]) {
+  async function rename(list: { item: CatalogItem; suggestion: NonNullable<ReturnType<typeof suggestTitle>> }[], keepCurrent = false) {
     if (!supabase || !list.length) return
     setWorking(true)
     let done = 0
     const conflicts: string[] = []
     for (const { item, suggestion } of list) {
-      const title = (edits[item.id] ?? suggestion.title).trim()
+      const title = (keepCurrent ? item.title : edits[item.id] ?? suggestion.title).trim()
       if (!title) continue
-      const patch: Partial<CatalogItem> = { title, title_key: titleKey(item.category, item.media_type, title, item.media_format ?? null) }
+      try { requireDecisionStorage(item) } catch (error) { conflicts.push((error as Error).message); continue }
+      const patch: Partial<CatalogItem> = { title, title_key: titleKey(item.category, item.media_type, title, item.media_format ?? null), metadata_preferences: { ...item.metadata_preferences, title } }
       if (!item.seasons_count && suggestion.seasons_count && item.category !== 'games') patch.seasons_count = suggestion.seasons_count
       if (!item.year && suggestion.year) patch.year = suggestion.year
-      const { error } = await supabase.from('catalog_items').update(patch).eq('id', item.id)
+      let write = supabase.from('catalog_items').update(patch).eq('id', item.id)
+      if (item.updated_at) write = write.eq('updated_at', item.updated_at)
+      const { data, error } = await write.select('*').maybeSingle()
       if (error) conflicts.push(error.code === '23505' ? `« ${title} » existe déjà (doublon à fusionner)` : `${item.title} : ${error.message}`)
-      else done++
+      else if (!data) conflicts.push(`« ${item.title} » a changé entre-temps. Vos données sont conservées.`)
+      else { done++; onUpdated(data as CatalogItem) }
     }
-    await onChanged()
     setWorking(false)
     onMessage(`${plural(done, 'titre')} nettoyé${done > 1 ? 's' : ''}.${conflicts.length ? ` ${conflicts.length} non modifié${conflicts.length > 1 ? 's' : ''} : ${conflicts.slice(0, 3).join(' ; ')}` : ''}`, !conflicts.length)
+  }
+  async function resetTitle(item: CatalogItem) {
+    if (!supabase) return
+    setWorking(true)
+    let write = supabase.from('catalog_items').update({ metadata_preferences: { ...item.metadata_preferences, title: undefined } }).eq('id', item.id)
+    if (item.updated_at) write = write.eq('updated_at', item.updated_at)
+    const result = await write.select('*').maybeSingle()
+    if (result.error || !result.data) onMessage(result.error?.message ?? 'La fiche a changé. Réessayez.')
+    else onUpdated(result.data as CatalogItem)
+    setWorking(false)
   }
   async function renameAll() {
     const ok = await confirm({ title: `Nettoyer ${pending.length} titres ?`, body: 'Les balises de release, suffixes de saisons et capitales seront retirés selon les propositions affichées. Les affiches, prix et saisons ne changent pas. Vérifiez la liste avant de confirmer.', confirm: 'Appliquer les propositions' })
@@ -141,7 +156,7 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onMessa
       <div className="admin-panel-head"><div><h2>Fiches incomplètes</h2><p>Cliquez sur un problème pour voir les titres concernés.</p></div>
         <div className="admin-row-actions"><button type="button" disabled={!translatable.length || posterJobRunning} onClick={() => void onRunPosterJob('translate', 'all', translatable.map((item) => item.id))}><Languages size={16} /> Traduire {plural(translatable.length, 'description')}</button><button type="button" className="button-primary" disabled={!incomplete.length || posterJobRunning} onClick={() => void onRunPosterJob('complete', 'all', incomplete.map((item) => item.id))}><Sparkles size={16} /> Compléter {plural(incomplete.length, 'fiche')}</button></div></div>
       <div className="issue-chips">{(Object.entries(counts) as [HealthIssue, number][]).map(([issue, count]) => <button type="button" key={issue} className={`issue-chip ${count ? '' : 'is-ok'}`} disabled={!count} onClick={() => onShowIssue(issue)}><span>{issueLabels[issue]}</span><strong>{count.toLocaleString('fr-FR')}</strong></button>)}</div>
-      {counts.measure > 0 && <p className="scan-help">Les fiches sans mesure doivent être vérifiées à partir de vos fichiers ou de la fiche de l’œuvre. Cliquez sur « Saisons ou taille manquantes » ci-dessus pour les ouvrir et saisir une valeur exacte.</p>}
+      <p className="scan-help">La complétion recherche aussi le total des saisons. Elle remplit une quantité absente ; les quantités issues du disque ou validées manuellement restent conservées. Les tailles de jeux proviennent toujours de vos fichiers.</p>
     </section>
 
     {sagas.length > 0 && <section className="admin-card">
@@ -168,9 +183,10 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onMessa
         <ArrowRight size={16} aria-hidden="true" />
         <label className="rename-after"><span className="visually-hidden">Nouveau titre pour {item.title}</span><input value={edits[item.id] ?? suggestion.title} onChange={(event) => setEdits((value) => ({ ...value, [item.id]: event.target.value }))} /></label>
         <div className="rename-extra">{!item.seasons_count && suggestion.seasons_count ? <em>+ {suggestion.seasons_count} saisons</em> : null}{!item.year && suggestion.year ? <em>+ {suggestion.year}</em> : null}</div>
-        <div className="admin-row-actions"><button type="button" disabled={working} onClick={() => void rename([{ item, suggestion }])}><Check size={15} /> Appliquer</button><button type="button" onClick={() => setSkipped((value) => new Set(value).add(item.id))}>Ignorer</button></div>
+        <div className="admin-row-actions"><button type="button" disabled={working} onClick={() => void rename([{ item, suggestion }])}><Check size={15} /> Appliquer</button><button type="button" disabled={working} onClick={() => void rename([{ item, suggestion }], true)}>Conserver ce titre</button></div>
       </div>)}</div>
       {pending.length > shown && <button type="button" className="button-ghost" onClick={() => setShown((value) => value + 60)}>Afficher plus ({pending.length - shown} restantes)</button>}
+      {acceptedTitles.length > 0 && <details><summary>{acceptedTitles.length} titre(s) accepté(s) par l’administrateur</summary><p className="admin-help">Ils ne seront plus signalés tant que leur nom reste celui que vous avez validé.</p>{acceptedTitles.slice(0, 25).map(item => <div className="admin-row-actions" key={item.id}><strong>{item.title}</strong><button type="button" disabled={working} onClick={() => void resetTitle(item)}>Autoriser à nouveau le nettoyage</button></div>)}</details>}
     </section>
 
     <section className="admin-card">

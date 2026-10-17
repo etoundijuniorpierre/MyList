@@ -8,6 +8,7 @@ import { readPosterJob, savePosterJob, type PosterJob } from './posterJobState'
 import { isLandscapePoster } from './posterDimensions'
 import { selectAnimePoster } from './animePosterMatch'
 import type { CatalogItem } from './types'
+import { needsCompletion } from './metadataDecisions'
 
 export async function resumePosterJob(initial: PosterJob, authorized: () => boolean, publish: (job: PosterJob) => void) {
   async function work() {
@@ -64,7 +65,7 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
             if (job.kind === 'complete') {
               // Toutes les sources sont consultées. Une seule œuvre sans doute possible : elle est appliquée ;
               // sinon les candidats partent dans la file « À arbitrer » où l'administrateur tranche.
-              if (readReviews()[item.id]?.dismissed) return { id: item.id, updated: 0, stored: 0, missing: 1 }
+              if (!needsCompletion(item) || (readReviews()[item.id]?.dismissed && !item.metadata_preferences?.match)) return { id: item.id, updated: 0, stored: 0, missing: 0 }
               const { completion, candidates } = await completeMetadata(item)
               if (!completion) {
                 if (!candidates.length) return { id: item.id, updated: 0, stored: 0, missing: 1 }
@@ -73,6 +74,7 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
               }
               const applied = await applyCompletion(item, completion, authorized)
               removeReview(item.id)
+              if (completion.seasons_error) return { id: item.id, updated: applied.updated, stored: applied.stored, missing: 0, retry: completion.seasons_error }
               return { id: item.id, updated: applied.updated, stored: applied.stored, missing: Number(applied.stillMissing) }
             }
             if (job.kind === 'repair-games') {
@@ -150,7 +152,7 @@ export async function resumePosterJob(initial: PosterJob, authorized: () => bool
       if (job.completed === job.total) {
         job = { ...job, result: job.kind === 'translate'
           ? `${job.updated} description(s) traduite(s) en français.${job.missing ? ` ${job.missing} échec(s) à relancer.` : ''}`
-          : `${job.updated} fiche(s) enrichie(s), ${job.stored} affiche(s) conservée(s).${job.review ? ` ${job.review} fiche(s) à arbitrer dans l’onglet « À arbitrer ».` : ''}${job.missing ? ` ${job.missing} sans aucun résultat.` : ''}` }
+          : `${job.updated} fiche(s) enrichie(s), ${job.stored} affiche(s) conservée(s).${job.review ? ` ${job.review} fiche(s) à arbitrer dans l’onglet « À arbitrer ».` : ''}${job.missing ? job.kind === 'complete' ? ` ${job.missing} fiche(s) encore incomplète(s) ou sans total de saisons sûr.` : ` ${job.missing} sans résultat.` : ''}` }
         savePosterJob(job); publish(job)
       }
     } catch (error) {

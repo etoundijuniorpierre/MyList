@@ -10,7 +10,15 @@ export function confirmedCatalogItem(items: CatalogItem[], item: CatalogItem, fi
 
 export function applyCatalogRows(current: CatalogItem[], rows: CatalogItem[], removedIds: string[] = []) {
   const removed = new Set(removedIds)
-  return [...new Map([...current.filter(item => !removed.has(item.id)), ...rows].map(item => [item.id, item])).values()]
+  const merged = new Map(current.filter(item => !removed.has(item.id)).map(item => [item.id, item]))
+  for (const row of rows) {
+    const previous = merged.get(row.id)
+    const before = Date.parse(previous?.updated_at ?? '')
+    const incoming = Date.parse(row.updated_at ?? '')
+    if (Number.isFinite(before) && Number.isFinite(incoming) && incoming < before) continue
+    merged.set(row.id, row)
+  }
+  return [...merged.values()]
 }
 
 /** Une lecture commencée avant une écriture ne doit pas annuler cette écriture. */

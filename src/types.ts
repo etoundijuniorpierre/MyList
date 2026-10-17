@@ -20,6 +20,10 @@ export interface CatalogItem {
   seasons_count: number | null
   game_size_gb: number | null
   created_at?: string
+  updated_at?: string
+  metadata_preferences?: import('./metadataDecisions').MetadataPreferences
+  seasons_total?: number | null
+  seasons_checked_at?: string | null
 }
 
 export type ItemInput = Omit<CatalogItem, 'id' | 'created_at'>

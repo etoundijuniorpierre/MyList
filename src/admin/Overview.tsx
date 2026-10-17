@@ -1,8 +1,9 @@
+import { needsCompletion } from '../metadataDecisions'
 import { useMemo, type CSSProperties } from 'react'
 import { ArrowRight, CircleAlert, FolderSearch, ListPlus, MessageCircle, Plus, Sparkles } from 'lucide-react'
 import { Cover } from '../media'
 import { categoryMeta, plural } from '../display'
-import { itemIssues, type HealthIssue } from '../titleHealth'
+import { itemIssues, issueLabels, type HealthIssue } from '../titleHealth'
 import { categories, type CatalogItem, type GamePriceTier, type PriceRule, type SiteSettings } from '../types'
 import type { AdminTab } from './tabs'
 
@@ -23,12 +24,12 @@ export function Overview({ items, prices, gameTiers, settings, posterJobRunning,
     return { ...entry, total: list.length, hidden: list.filter((item) => !item.active).length, poster: pct((item) => Boolean(item.poster_url)), synopsis: pct((item) => Boolean(item.synopsis?.trim())), genres: pct((item) => item.genres.length > 0) }
   }), [items])
   const issues = useMemo(() => {
-    const counts: Record<HealthIssue, number> = { poster: 0, synopsis: 0, genres: 0, year: 0, measure: 0, title: 0 }
+    const counts: Record<HealthIssue, number> = { poster: 0, synopsis: 0, genres: 0, year: 0, measure: 0, title: 0, seasons: 0 }
     for (const item of items) for (const issue of itemIssues(item)) counts[issue]++
     return counts
   }, [items])
   const recent = useMemo(() => [...items].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')).slice(0, 8), [items])
-  const incomplete = items.filter((item) => !item.poster_url || !item.synopsis?.trim() || !item.genres.length).length
+  const incomplete = items.filter(needsCompletion).length
   const unpriced = (['series', 'anime', 'novelas', 'dramas'] as const).filter((category) => items.some((item) => item.category === category) && prices.find((rule) => rule.category === category)?.standard_price == null)
   const checklist = [
     { ok: Boolean(settings.whatsapp_number), text: settings.whatsapp_number ? 'Numéro WhatsApp configuré' : 'Aucun numéro WhatsApp : les visiteurs ne peuvent pas envoyer leur panier', tab: 'settings' as AdminTab },
@@ -57,7 +58,7 @@ export function Overview({ items, prices, gameTiers, settings, posterJobRunning,
       </section>
       <section className="admin-card">
         <h2>Qualité des fiches</h2>
-        <ul className="issue-list">{(Object.entries(issues) as [HealthIssue, number][]).filter(([, count]) => count).map(([issue, count]) => <li key={issue}><button type="button" onClick={() => onGo(issue === 'title' ? 'health' : 'catalog', issue)}><CircleAlert size={15} aria-hidden="true" /> <span>{({ poster: 'Sans affiche', synopsis: 'Sans description', genres: 'Sans genre', year: 'Sans année', measure: 'Saisons ou taille manquantes', title: 'Titres à nettoyer' } as Record<HealthIssue, string>)[issue]}</span><strong>{count.toLocaleString('fr-FR')}</strong></button></li>)}</ul>
+        <ul className="issue-list">{(Object.entries(issues) as [HealthIssue, number][]).filter(([, count]) => count).map(([issue, count]) => <li key={issue}><button type="button" onClick={() => onGo(issue === 'title' ? 'health' : 'catalog', issue)}><CircleAlert size={15} aria-hidden="true" /> <span>{issueLabels[issue]}</span><strong>{count.toLocaleString('fr-FR')}</strong></button></li>)}</ul>
         <button type="button" className="button-primary full" disabled={!incomplete || posterJobRunning} onClick={onComplete}><Sparkles size={17} /> {posterJobRunning ? 'Traitement en cours…' : `Compléter ${plural(incomplete, 'fiche')} automatiquement`}</button>
         <p className="admin-help">Interroge AniList, MyAnimeList, Kitsu, TVMaze, TheTVDB, IGDB/RAWG/Steam et Wikipédia. Seuls les champs vides sont remplis ; la traduction française est automatique.</p>
       </section>

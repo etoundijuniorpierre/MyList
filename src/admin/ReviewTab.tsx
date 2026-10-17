@@ -8,6 +8,8 @@ import { applyCompletion } from '../applyCompletion'
 import { dismissReview, readReviews, removeReview, REVIEW_EVENT, REVIEW_KEY, saveReview, type ReviewEntry } from '../reviewStore'
 import { titleKey, type CatalogItem, type Category } from '../types'
 import type { PosterJobKind } from '../App'
+import { supabase } from '../supabase'
+import { acceptedPreferences, needsCompletion, requireDecisionStorage, retainedCandidate, reviewIsPending } from '../metadataDecisions'
 
 const RENAME_KEY = 'mylist-review-rename'
 const sourceNames: Record<string, string> = { anilist: 'AniList', 'jikan-anime': 'MyAnimeList', kitsu: 'Kitsu', tvmaze: 'TVMaze', tvdb: 'TheTVDB', igdb: 'IGDB', rawg: 'RAWG', steam: 'Steam', wikipedia: 'Wikipédia' }
@@ -16,6 +18,7 @@ interface Props {
   items: CatalogItem[]
   posterJobRunning: boolean
   onChanged: () => Promise<void>
+  onUpdated: (item: CatalogItem) => void
   onMessage: (text: string, success?: boolean) => void
   onEdit: (item: CatalogItem) => void
   onRunPosterJob: (kind: PosterJobKind, filter: Category | 'all', ids?: string[]) => Promise<void>
@@ -30,11 +33,11 @@ export function useReviewCount(items: CatalogItem[]) {
     window.addEventListener('storage', storage)
     return () => { window.removeEventListener(REVIEW_EVENT, refresh); window.removeEventListener('storage', storage) }
   }, [])
-  const ids = new Set(items.map((item) => item.id))
-  return { entries, count: Object.values(entries).filter((entry) => !entry.dismissed && entry.candidates.length && ids.has(entry.itemId)).length }
+  const byId = new Map(items.map((item) => [item.id, item]))
+  return { entries, count: Object.values(entries).filter((entry) => entry.candidates.length && byId.has(entry.itemId) && reviewIsPending(byId.get(entry.itemId)!, entry.dismissed)).length }
 }
 
-export function ReviewTab({ items, posterJobRunning, onChanged, onMessage, onEdit, onRunPosterJob }: Props) {
+export function ReviewTab({ items, posterJobRunning, onUpdated, onMessage, onEdit, onRunPosterJob }: Props) {
   const { entries } = useReviewCount(items)
   const [rename, setRename] = useState(() => { try { return localStorage.getItem(RENAME_KEY) === '1' } catch { return false } })
   const [busy, setBusy] = useState<string | null>(null)
@@ -42,10 +45,11 @@ export function ReviewTab({ items, posterJobRunning, onChanged, onMessage, onEdi
   const [shown, setShown] = useState(25)
   const byId = useMemo(() => new Map(items.map((item) => [item.id, item])), [items])
   const pending = useMemo(() => Object.values(entries)
-    .filter((entry) => !entry.dismissed && entry.candidates.length && byId.has(entry.itemId))
+    .filter((entry) => entry.candidates.length && byId.has(entry.itemId) && reviewIsPending(byId.get(entry.itemId)!, entry.dismissed))
     .sort((a, b) => a.title.localeCompare(b.title, 'fr', { sensitivity: 'base' })), [entries, byId])
-  const dismissed = Object.values(entries).filter((entry) => entry.dismissed && byId.has(entry.itemId))
-  const incomplete = items.filter((item) => item.active && (!item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year) && !entries[item.id])
+  const dismissed = items.filter(item => item.metadata_preferences?.rejected || entries[item.id]?.dismissed)
+  const incomplete = items.filter((item) => item.active && needsCompletion(item) && (!entries[item.id] || retainedCandidate(item)))
+  const accepted = items.filter(item => item.metadata_preferences?.match)
 
   useEffect(() => { try { localStorage.setItem(RENAME_KEY, rename ? '1' : '0') } catch { /* Préférence locale facultative. */ } }, [rename])
 
@@ -53,23 +57,54 @@ export function ReviewTab({ items, posterJobRunning, onChanged, onMessage, onEdi
     const item = byId.get(entry.itemId)
     if (!item) return
     setBusy(item.id)
+    let decisionSaved = false
     try {
+      requireDecisionStorage(item)
+      if (!supabase) return
       const extra: Record<string, unknown> = {}
       const format = item.category === 'anime' && candidate.format && candidate.format !== (item.media_format === 'film' ? 'film' : 'series') ? candidate.format : null
       const title = rename && candidate.title.trim() ? candidate.title.trim() : item.title
-      if (format) { extra.media_format = format; if (format === 'film') extra.seasons_count = null; else if (!item.seasons_count) extra.seasons_count = 1 }
+      if (format) { extra.media_format = format; if (format === 'film') extra.seasons_count = null }
       if (title !== item.title || format) {
         extra.title = title
         extra.title_key = titleKey(item.category, item.media_type, title, item.category === 'anime' ? (format ?? item.media_format ?? null) : null)
       }
-      const completion = await completionFrom(item, candidate)
-      await applyCompletion(item, completion, () => true, extra)
+      extra.metadata_preferences = acceptedPreferences(item, candidate, title)
+      let write = supabase.from('catalog_items').update(extra).eq('id', item.id)
+      if (item.updated_at) write = write.eq('updated_at', item.updated_at)
+      const decision = await write.select('*').maybeSingle()
+      if (decision.error) throw new Error(decision.error.message)
+      if (!decision.data) throw new Error('La fiche a changé. Rechargez la liste avant de valider votre choix.')
+      const confirmed = decision.data as CatalogItem
+      decisionSaved = true
+      onUpdated(confirmed)
       removeReview(item.id)
-      await onChanged()
-      onMessage(`« ${title} » complétée depuis ${candidate.sources.map((source) => sourceNames[source] ?? source).join(', ')}.${format ? ` Format corrigé : ${format === 'film' ? 'film' : 'série'}.` : ''}`, true)
+      const completion = await completionFrom(confirmed, candidate)
+      const applied = await applyCompletion(confirmed, completion)
+      if (applied.item) onUpdated(applied.item)
+      onMessage(`« ${title} » : choix conservé, fiche complétée depuis ${candidate.sources.map((source) => sourceNames[source] ?? source).join(', ')}.${format ? ` Format corrigé : ${format === 'film' ? 'film' : 'série'}.` : ''}${completion.seasons_error ? ` Total des saisons à reprendre : ${completion.seasons_error}` : ''}`, !completion.seasons_error)
     } catch (error) {
-      onMessage(error instanceof Error ? error.message : 'Enregistrement impossible.')
+      const reason = error instanceof Error ? error.message : 'Enregistrement impossible.'
+      onMessage(decisionSaved ? `Votre choix est enregistré et ne sera plus remis en arbitrage. Complétion à reprendre : ${reason}` : reason)
     } finally { setBusy(null) }
+  }
+
+  async function setRejected(item: CatalogItem, rejected: boolean) {
+    setBusy(item.id)
+    try {
+      requireDecisionStorage(item)
+      if (!supabase) return
+      const preferences = { ...item.metadata_preferences, match: undefined, rejected, ignore_source: true }
+      let write = supabase.from('catalog_items').update({ metadata_preferences: preferences }).eq('id', item.id)
+      if (item.updated_at) write = write.eq('updated_at', item.updated_at)
+      const result = await write.select('*').maybeSingle()
+      if (result.error) throw new Error(result.error.message)
+      if (!result.data) throw new Error('La fiche a changé. Réessayez depuis la liste actualisée.')
+      onUpdated(result.data as CatalogItem)
+      if (rejected) dismissReview(item.id, item.title); else removeReview(item.id)
+      onMessage(rejected ? `« ${item.title} » : propositions refusées et décision conservée.` : `« ${item.title} » peut à nouveau être recherché.`, true)
+    } catch (error) { onMessage(error instanceof Error ? error.message : 'Décision non enregistrée.') }
+    finally { setBusy(null) }
   }
 
   async function searchAgain(entry: ReviewEntry) {
@@ -95,7 +130,7 @@ export function ReviewTab({ items, posterJobRunning, onChanged, onMessage, onEdi
     const onKey = (event: KeyboardEvent) => {
       if (busy || (event.target as HTMLElement)?.closest('input, textarea, select, dialog')) return
       const index = Number(event.key)
-      if (event.key === '0') { dismissReview(first.itemId, first.title); return }
+      if (event.key === '0') { void setRejected(byId.get(first.itemId)!, true); return }
       if (index >= 1 && index <= first.candidates.length) void choose(first, first.candidates[index - 1])
     }
     window.addEventListener('keydown', onKey)
@@ -131,7 +166,7 @@ export function ReviewTab({ items, posterJobRunning, onChanged, onMessage, onEdi
         <div className="review-actions">
           <form onSubmit={(event) => { event.preventDefault(); void searchAgain(entry) }} className="search-field"><Search size={15} aria-hidden="true" /><span className="visually-hidden">Autre titre pour {item.title}</span><input value={queries[entry.itemId] ?? ''} onChange={(event) => setQueries((current) => ({ ...current, [entry.itemId]: event.target.value }))} placeholder="Chercher avec un autre titre…" /><button type="submit" className="field-clear" disabled={Boolean(busy)} aria-label="Lancer la recherche">{busy === item.id ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}</button></form>
           <div className="admin-row-actions">
-            <button type="button" disabled={Boolean(busy)} onClick={() => dismissReview(entry.itemId, entry.title)}><X size={15} /> Aucune ne convient</button>
+            <button type="button" disabled={Boolean(busy)} onClick={() => void setRejected(item, true)}><X size={15} /> Aucune ne convient</button>
             <button type="button" onClick={() => onEdit(item)}>Modifier la fiche</button>
             {entry.candidates[0] && safeUrl(entry.candidates[0].source_url) && <a href={safeUrl(entry.candidates[0].source_url)} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> Voir la source</a>}
           </div>
@@ -139,6 +174,6 @@ export function ReviewTab({ items, posterJobRunning, onChanged, onMessage, onEdi
       </article>
     })}</div>
     {pending.length > shown && <button type="button" className="button-ghost" onClick={() => setShown((value) => value + 25)}>Afficher plus ({pending.length - shown} restantes)</button>}
-    {dismissed.length > 0 && <p className="admin-help">{plural(dismissed.length, 'fiche')} marquée{dismissed.length > 1 ? 's' : ''} « aucune ne convient » : la recherche automatique les ignore. Complétez-les depuis « Modifier la fiche », ou <button type="button" className="text-button" onClick={() => dismissed.forEach((entry) => removeReview(entry.itemId))}>remettez-les dans la recherche</button>.</p>}
+    {(accepted.length > 0 || dismissed.length > 0) && <details><summary>{accepted.length} correspondance(s) validée(s) · {dismissed.length} refusée(s)</summary><p className="admin-help">Ces décisions sont conservées dans Supabase. Seule une réinitialisation explicite relance l’arbitrage.</p>{[...accepted, ...dismissed].slice(0, 50).map(item => <div className="admin-row-actions" key={item.id}><strong>{item.title}</strong><span>{item.metadata_preferences?.match ? `→ ${item.metadata_preferences.match.title}` : 'Aucune proposition retenue'}</span><button type="button" disabled={Boolean(busy)} onClick={() => void setRejected(item, false)}>Réinitialiser la décision</button></div>)}</details>}
   </section>
 }

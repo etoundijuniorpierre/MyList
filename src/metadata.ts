@@ -6,6 +6,8 @@ import { cleanTitle } from './folderScan'
 import { supabase } from './supabase'
 import { mergeMetadataResults } from './metadataMerge'
 import { buildCandidates, pickCandidate, variantsWithKind, type Candidate } from './metadataMatch'
+import { needsCompletion, needsSeasonLookup, retainedCandidate } from './metadataDecisions'
+import type { CompletionData } from './completionPlan'
 
 type TvShow = { show: { id: number; name: string; summary: string | null; premiered: string | null; genres: string[]; image: { medium: string; original: string } | null; url: string } }
 type AnimeSearch = { data: { mal_id: number; title: string; title_english?: string | null; title_synonyms?: string[]; type?: string | null; synopsis: string | null; year?: number | null; aired?: { from: string | null }; genres: { name: string }[]; images?: { jpg?: { large_image_url?: string; image_url?: string } }; url: string }[] }
@@ -351,17 +353,7 @@ export async function frenchWikiSummary(query: string, category: Category): Prom
   return null
 }
 
-export interface Completion {
-  poster_url?: string
-  synopsis?: string
-  synopsisInFrench?: boolean
-  genres?: string[]
-  year?: number
-  source?: string
-  source_id?: string | null
-  source_url?: string | null
-  sources: string[]
-}
+export type Completion = CompletionData
 
 /**
  * Interroge toutes les sources avec plusieurs variantes du titre et renvoie les œuvres possibles, triées par ressemblance.
@@ -396,7 +388,7 @@ export async function findCandidates(item: CatalogItem, query?: string): Promise
 
 /** Champs manquants d'une fiche, remplis depuis l'œuvre choisie ; le résumé Wikipédia français est préféré. */
 export async function completionFrom(item: CatalogItem, candidate: Candidate): Promise<Completion> {
-  const completion: Completion = { sources: [...candidate.sources] }
+  const completion: Completion = { sources: [...candidate.sources], binding: candidate }
   if (!item.poster_url && candidate.poster_url?.startsWith('https://')) completion.poster_url = candidate.poster_url
   if (!item.genres.length && candidate.genres.length) completion.genres = candidate.genres.slice(0, 6)
   if (!item.year && candidate.year) completion.year = candidate.year
@@ -410,6 +402,22 @@ export async function completionFrom(item: CatalogItem, candidate: Candidate): P
     completion.source_id = candidate.source_id
     completion.source_url = candidate.source_url
   }
+  if ('metadata_preferences' in item && needsSeasonLookup(item) && candidate.format !== 'film') {
+   try {
+    const identities = [...(candidate.identities ?? []), { source: candidate.source, id: candidate.source_id ?? '' }]
+    const identity = identities.find(entry => entry.source === 'tvmaze') ?? identities.find(entry => ['anilist', 'jikan-anime', 'tvdb'].includes(entry.source)) ?? identities[0]
+    const params = new URLSearchParams({ source: identity.source, id: /^\d+$/.test(identity.id) ? identity.id : '', title: candidate.title, category: item.category })
+    if (candidate.year) params.set('year', String(candidate.year))
+    candidate.aliases.filter(alias => alias.length >= 2 && alias.length <= 160).slice(0, 2).forEach(alias => params.append('alias', alias))
+    const response = await fetch(`/api/season-count?${params}`, { signal: AbortSignal.timeout(20_000) })
+    if (!response.ok) throw new Error('La source des saisons est indisponible. La complétion pourra être reprise sans perdre votre choix.')
+    const result = await response.json() as { count: number | null; reason?: string; source_url?: string }
+    completion.seasons_checked_at = new Date().toISOString()
+    completion.seasons_note = result.reason
+    completion.seasons_source_url = result.source_url
+    if (result.count && Number.isInteger(result.count) && result.count <= 999) completion.seasons_total = result.count
+   } catch (error) { completion.seasons_error = error instanceof Error ? error.message : 'La recherche du total des saisons doit être reprise.' }
+  }
   return completion
 }
 
@@ -418,8 +426,29 @@ export async function completionFrom(item: CatalogItem, candidate: Candidate): P
  * pour que l'administrateur tranche dans la file « À arbitrer ».
  */
 export async function completeMetadata(item: CatalogItem): Promise<{ completion: Completion | null; candidates: Candidate[] }> {
-  const need = !item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year
-  if (!need) return { completion: null, candidates: [] }
+  if (!needsCompletion(item)) return { completion: null, candidates: [] }
+  // Une décision humaine reste la référence, même si la similarité du titre a changé.
+  const pinned = retainedCandidate(item)
+  if (pinned) {
+    let chosen = pinned
+    const missingInSource = (!item.poster_url && !pinned.poster_url) || (!item.genres.length && !pinned.genres.length) || (!item.year && !pinned.year) || (!item.synopsis?.trim() && (pinned.synopsis?.length ?? 0) < 40)
+    if (missingInSource && pinned.source === 'tvmaze' && pinned.source_id && /^\d+$/.test(pinned.source_id)) {
+      const show = await getJson<TvShow['show']>(`https://api.tvmaze.com/shows/${pinned.source_id}`)
+      chosen = { ...pinned, title: show.name, aliases: [...new Set([...pinned.aliases, item.title])],
+        poster_url: show.image?.original ?? show.image?.medium ?? pinned.poster_url,
+        synopsis: plainText(show.summary) ?? pinned.synopsis, genres: show.genres?.length ? show.genres : pinned.genres,
+        year: show.premiered ? Number(show.premiered.slice(0, 4)) : pinned.year }
+    } else if (missingInSource) {
+      // Recherche avec le nom de l'œuvre retenue, puis filtre strict sur son identifiant.
+      // Aucune autre œuvre n'est choisie et aucune ambiguïté n'est recréée.
+      const refreshed = await findCandidates(item, pinned.title)
+      const ids = [...(pinned.identities ?? []), { source: pinned.source, id: pinned.source_id }]
+      const same = refreshed.find(candidate => [...(candidate.identities ?? []), { source: candidate.source, id: candidate.source_id }]
+        .some(identity => identity.id && ids.some(known => known.source === identity.source && known.id === identity.id)))
+      if (same) chosen = { ...pinned, ...same, key: pinned.key, source: pinned.source, source_id: pinned.source_id, source_url: pinned.source_url }
+    }
+    return { completion: await completionFrom(item, chosen), candidates: [] }
+  }
   const candidates = await findCandidates(item)
   const picked = pickCandidate(candidates)
   if (!picked) return { completion: null, candidates }

@@ -48,9 +48,14 @@ export function useCatalog(path: string, search: string, isAdmin: boolean, selec
   const getItems = useCallback(() => itemsRef.current, [])
   const commitItems = useCallback((rows: CatalogItem[], removedIds: string[] = []) => {
     const sequence = ++mutationSequence.current
-    rows.forEach(item => mutations.current.set(item.id, { sequence, item }))
+    const merged = applyCatalogRows(itemsRef.current, rows, removedIds)
+    const byId = new Map(merged.map(item => [item.id, item]))
+    rows.forEach(row => {
+      const item = byId.get(row.id)
+      if (item) mutations.current.set(item.id, { sequence, item })
+    })
     removedIds.forEach(id => mutations.current.set(id, { sequence, item: null }))
-    itemsRef.current = applyCatalogRows(itemsRef.current, rows, removedIds)
+    itemsRef.current = merged
     setItems(current => applyCatalogRows(current, rows, removedIds))
     browseCache.current.clear()
     setRevision(value => value + 1)

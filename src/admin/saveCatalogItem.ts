@@ -32,7 +32,7 @@ export function itemWriteLocks(items: CatalogItem[], input: ItemInput, id?: stri
 
 export interface CatalogCommit { item: CatalogItem; removedIds: string[]; field?: 'synopsis' | 'poster_url'; expected?: string }
 
-export async function saveCatalogItem(client: SupabaseClient, input: ItemInput, id: string | undefined, items: CatalogItem[], commit: (change: CatalogCommit) => void, authorized: () => boolean = () => true) {
+export async function saveCatalogItem(client: SupabaseClient, input: ItemInput, id: string | undefined, items: CatalogItem[], commit: (change: CatalogCommit) => void, authorized: () => boolean = () => true, manual = false) {
   if (!authorized()) throw new Error('La session administrateur a changé. Reconnectez-vous.')
   const clean = cleanItemInput(input)
   if (!clean.title || isCatalogNoiseTitle(clean.title)) throw new Error('Le nom du dossier ne correspond pas à un titre exploitable.')
@@ -42,8 +42,19 @@ export async function saveCatalogItem(client: SupabaseClient, input: ItemInput, 
   const edited = id ? items.find(item => item.id === id) : undefined
   if (id && !edited) throw new Error('Cette fiche n’est plus disponible. Vérifiez le catalogue avant de la recréer.')
   const payload = { ...mergeCatalogUpdate(clean, existing, id && duplicate ? edited : undefined),
-    title: duplicate ? duplicate.title : existing ? existing.title : clean.title,
-    title_key: existing?.title_key ?? clean.title_key,
+    title: duplicate ? duplicate.title : manual ? clean.title : existing ? existing.title : clean.title,
+    title_key: duplicate ? duplicate.title_key : manual ? clean.title_key : existing?.title_key ?? clean.title_key,
+  }
+  if (manual) {
+    payload.metadata_preferences = { ...edited?.metadata_preferences, ...existing?.metadata_preferences, title: payload.title }
+    if (clean.seasons_count) { payload.metadata_preferences.seasons_manual = clean.seasons_count; payload.metadata_preferences.seasons_auto = false }
+    else { delete payload.metadata_preferences.seasons_manual; payload.metadata_preferences.seasons_auto = false }
+    const changedIdentity = clean.source !== existing?.source || clean.source_id !== existing?.source_id
+    if (clean.source_id && !['manual', 'scan', 'pdf-list'].includes(clean.source) && (!payload.metadata_preferences.rejected || changedIdentity) && (!payload.metadata_preferences.match || clean.source !== payload.metadata_preferences.match.source || clean.source_id !== payload.metadata_preferences.match.source_id)) {
+      payload.metadata_preferences.rejected = false
+      payload.metadata_preferences.match = { key: `${clean.source}:${clean.source_id}`, title: clean.title, aliases: [], category: clean.category, format: clean.media_format ?? null,
+        year: clean.year, poster_url: clean.poster_url, synopsis: clean.synopsis, genres: clean.genres, source: clean.source, source_id: clean.source_id, source_url: clean.source_url, sources: [clean.source], score: 1, notes: [], identities: [{ source: clean.source, id: clean.source_id }] }
+    }
   }
   const response = target ? await client.from('catalog_items').update(payload).eq('id', target).select('*').single()
     : await client.from('catalog_items').insert(payload).select('*').single()

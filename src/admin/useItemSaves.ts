@@ -26,7 +26,7 @@ export function useItemSaves(options: Options) {
       const { saveCatalogItem } = await import('./saveCatalogItem')
       const item = await saveCatalogItem(supabase, job.input, job.itemId, runtime.current.getItems(), change => {
         if (authorized()) runtime.current.commit(change)
-      }, authorized)
+      }, authorized, true)
       // Les enrichissements restent séparés de l'enregistrement principal.
       void import('./savedEnrichment').then(({ enrichSavedItem }) => enrichSavedItem(item, change => {
         if (authorized()) runtime.current.commit(change)

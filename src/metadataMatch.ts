@@ -17,6 +17,7 @@ export interface Candidate {
   source_id: string | null
   source_url: string | null
   sources: string[]
+  identities?: { source: string; id: string }[]
   /** Ressemblance de 0 à 1 avec le titre de la fiche, après pénalités de format et d'année. */
   score: number
   notes: string[]
@@ -102,6 +103,7 @@ export function buildCandidates(item: Pick<CatalogItem, 'category' | 'media_form
       key: `${result.source}:${result.source_id ?? result.title}`, title: result.title, aliases: result.aliases ?? [], year: result.year,
       format: result.media_format ?? null, category: result.category, poster_url: result.poster_url, synopsis: result.synopsis,
       genres: result.genres, source: result.source, source_id: result.source_id, source_url: result.source_url, sources: [result.source], score, notes,
+      identities: result.source_id ? [{ source: result.source, id: result.source_id }] : [],
     }
     const existing = groups.find((group) => sameWork(group, entry))
     if (!existing) { groups.push(entry); continue }
@@ -112,6 +114,7 @@ export function buildCandidates(item: Pick<CatalogItem, 'category' | 'media_form
     existing.format ??= entry.format
     existing.aliases = [...new Set([...existing.aliases, entry.title, ...entry.aliases])]
     if (!existing.sources.includes(entry.source)) existing.sources.push(entry.source)
+    existing.identities = [...(existing.identities ?? []), ...(entry.identities ?? [])].filter((entry, index, all) => all.findIndex(other => other.source === entry.source && other.id === entry.id) === index)
     if (entry.score > existing.score) { existing.score = entry.score; existing.notes = entry.notes }
   }
   return groups.sort((a, b) => b.score - a.score || Number(Boolean(b.poster_url)) - Number(Boolean(a.poster_url))).slice(0, 5)

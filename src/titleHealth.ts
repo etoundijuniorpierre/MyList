@@ -31,7 +31,8 @@ export interface TitleSuggestion {
 }
 
 /** Propose un titre propre (sans balises de release, suffixe de saisons ni capitales criées) ou null s'il n'y a rien à corriger. */
-export function suggestTitle(item: Pick<CatalogItem, 'title' | 'seasons_count' | 'year' | 'category'>): TitleSuggestion | null {
+export function suggestTitle(item: Pick<CatalogItem, 'title' | 'seasons_count' | 'year' | 'category' | 'metadata_preferences'>): TitleSuggestion | null {
+  if (item.metadata_preferences?.title === item.title) return null
   const original = item.title.trim()
   const yearMatch = original.match(/\(((?:19|20)\d{2})\)/)
   const seasons = item.category === 'games' ? null : seasonsFromSuffix(original)
@@ -45,7 +46,7 @@ export function suggestTitle(item: Pick<CatalogItem, 'title' | 'seasons_count' |
   }
 }
 
-export type HealthIssue = 'poster' | 'synopsis' | 'genres' | 'year' | 'measure' | 'title'
+export type HealthIssue = 'poster' | 'synopsis' | 'genres' | 'year' | 'measure' | 'title' | 'seasons'
 
 export const issueLabels: Record<HealthIssue, string> = {
   poster: 'Sans affiche',
@@ -54,6 +55,7 @@ export const issueLabels: Record<HealthIssue, string> = {
   year: 'Sans année',
   measure: 'Saisons ou taille manquantes',
   title: 'Titre à nettoyer',
+  seasons: 'Total des saisons manquant',
 }
 
 export function itemIssues(item: CatalogItem): HealthIssue[] {
@@ -64,6 +66,7 @@ export function itemIssues(item: CatalogItem): HealthIssue[] {
   if (!item.year) issues.push('year')
   if (item.category === 'games' ? !item.game_size_gb : item.media_format !== 'film' && !item.seasons_count) issues.push('measure')
   if (suggestTitle(item)) issues.push('title')
+  if (item.category !== 'games' && item.media_format !== 'film' && !item.seasons_total) issues.push('seasons')
   return issues
 }
 
