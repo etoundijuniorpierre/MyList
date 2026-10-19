@@ -191,7 +191,7 @@ export default function OrderPage({ demo, onVerifyPricing }: { demo: CatalogItem
     {chosen && <section className="order-summary" aria-labelledby="order-summary-title" aria-busy={!!phase || sending}>
       <div className="order-selected"><Cover item={chosen.item} sizes="100px" /><div><span className="eyebrow">{chosen.inCatalog ? 'Au catalogue' : 'Sur demande'}</span><h2 id="order-summary-title">{chosen.item.title}</h2><p>{kindLabel(chosen.item)} · {chosen.item.year ?? 'Année à confirmer'} · {measureLabel(chosen.item)}</p></div></div>
       {!phase && <><strong className="order-price">{pricing ? `${chosen.inCatalog ? '' : 'Estimation : '}${formatPrice(pricing.amount, pricing.currency)}` : 'Prix à confirmer'}</strong>{pricing && <p>{pricing.detail}</p>}
-        {!chosen.inCatalog && <p>Disponibilité à confirmer. L’estimation applique les tarifs actuels à ce titre uniquement.</p>}
+        {!chosen.inCatalog && <p>Disponibilité à confirmer. L’estimation applique {site.settings.order_pricing ? 'les tarifs des commandes hors catalogue' : 'les tarifs actuels du catalogue'} à ce titre uniquement.</p>}
         {note && <p className="order-warning">{note}</p>}
         {!pricing && <p>{chosen.item.category === 'games' ? 'Le poids du jeu ou son tarif doit être confirmé.' : 'Les saisons ou le tarif doivent être confirmés.'} La demande peut tout de même être envoyée.</p>}
         <label className="order-name">Votre nom (facultatif)<input autoComplete="name" maxLength={80} value={name} disabled={sending} onChange={event => setName(event.target.value)} /></label>

@@ -7,6 +7,7 @@ require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileMo
 }).outputText, filename)
 const { catalogFirstSearch, catalogSearchPattern, programQuote, programOrderMessage } = require('../src/programOrder.ts')
 const { releaseTouchFocus, syncModal } = require('../src/dialogState.ts')
+const { orderPricingError } = require('../src/orderPricing.ts')
 const item = (extra = {}) => ({ id: '1', category: 'series', media_type: null, title: 'Un titre', title_key: 'series:none:un titre',
   poster_url: null, synopsis: null, genres: [], year: 2020, source: 'tvmaze', source_id: '1', source_url: null, active: true, seasons_count: 3, game_size_gb: null, ...extra })
 const settings = { prices: [
@@ -16,6 +17,63 @@ const settings = { prices: [
 ], gameTiers: [{ min_gb: 1, max_gb: 49, price: 1000, currency: 'XAF' }, { min_gb: 50, max_gb: 100, price: 2000, currency: 'XAF' }],
   gameDiscount: { min_games: 5, price_per_game: 800, currency: 'XAF' }, settings: { whatsapp_number: '237600000000' } }
 const format = (amount, currency) => `${amount} ${currency}`
+const customGrid = () => ({
+  prices: [
+    { category: 'series', standard_price: 900, threshold_seasons: 3, threshold_price: 800, currency: 'XAF' },
+    { category: 'anime', standard_price: 600, threshold_seasons: null, threshold_price: null, currency: 'XAF' },
+    { category: 'anime-film', standard_price: 1100, threshold_seasons: null, threshold_price: null, currency: 'XAF' },
+    { category: 'novelas', standard_price: 750, threshold_seasons: null, threshold_price: null, currency: 'XAF' },
+    { category: 'dramas', standard_price: 950, threshold_seasons: null, threshold_price: null, currency: 'XAF' },
+  ], gameTiers: [{ min_gb: 1, max_gb: 49, price: 1500, currency: 'XAF' }, { min_gb: 50, max_gb: 100, price: 3500, currency: 'XAF' }],
+  gameDiscount: { min_games: 3, price_per_game: 1200, currency: 'XAF' },
+})
+
+test('la grille commande s’applique uniquement aux titres absents, les tarifs catalogue sont conservés', () => {
+  const grid = customGrid()
+  assert.equal(orderPricingError(grid), null)
+  const configured = { ...settings, settings: { ...settings.settings, order_pricing: grid } }
+  assert.equal(programQuote({ item: item(), inCatalog: false }, configured).amount, 2400)
+  assert.equal(programQuote({ item: item(), inCatalog: true }, configured).amount, 1200)
+  assert.equal(programQuote({ item: item(), inCatalog: false }, settings).amount, 1200)
+  assert.equal(programQuote({ item: item(), inCatalog: false }, { ...configured, settings: { order_pricing: null } }).amount, 1200)
+})
+test('tous les univers utilisent leurs tarifs spécifiques de commande, dont les films et les paliers jeux', () => {
+  const configured = { ...settings, settings: { ...settings.settings, order_pricing: customGrid() } }
+  for (const [extra, expected] of [
+    [{ category: 'anime', seasons_count: 2 }, 1200], [{ category: 'anime', media_format: 'film', seasons_count: null }, 1100],
+    [{ category: 'novelas', seasons_count: 2 }, 1500], [{ category: 'dramas', seasons_count: 2 }, 1900],
+    [{ category: 'games', game_size_gb: 49.01 }, 3500],
+  ]) assert.equal(programQuote({ item: item(extra), inCatalog: false }, configured).amount, expected)
+  assert.equal(programQuote({ item: item({ category: 'games', game_size_gb: null }), inCatalog: false }, configured), null)
+})
+test('un tarif de commande vide ou invalide ne reprend pas silencieusement le prix catalogue', () => {
+  const grid = customGrid()
+  grid.prices[0] = { ...grid.prices[0], standard_price: null, currency: null, threshold_seasons: null, threshold_price: null }
+  assert.equal(orderPricingError(grid), null)
+  const configured = { ...settings, settings: { ...settings.settings, order_pricing: grid } }
+  assert.equal(programQuote({ item: item(), inCatalog: false }, configured), null)
+  grid.prices[0].standard_price = 0
+  assert.ok(orderPricingError(grid))
+  assert.equal(programQuote({ item: item(), inCatalog: false }, configured), null)
+  assert.equal(programQuote({ item: item(), inCatalog: true }, configured).amount, 1200)
+})
+test('la grille refuse les chevauchements, catégories dupliquées et remises incohérentes', () => {
+  const edits = [
+    grid => { grid.gameTiers[1].min_gb = 49 }, grid => { grid.prices[1].category = 'series' },
+    grid => { grid.prices[0].threshold_price = 1000 }, grid => { grid.gameDiscount.min_games = 1 },
+    grid => { grid.prices[0].threshold_seasons = 2.5 }, grid => { grid.prices[1].currency = 'EUR' },
+  ]
+  for (const edit of edits) { const grid = customGrid(); edit(grid); assert.ok(orderPricingError(grid)) }
+})
+test('le message WhatsApp reprend le dernier tarif de commande et annonce son application hors catalogue', () => {
+  const grid = customGrid()
+  const configured = { ...settings, settings: { ...settings.settings, order_pricing: grid } }
+  grid.prices[0].threshold_price = 850
+  const message = programOrderMessage({ item: item(), inCatalog: false }, configured, '', format)
+  assert.match(message, /Prix estimé, sous réserve de disponibilité : 2550 XAF/)
+  assert.match(message, /Tarif commande hors catalogue/)
+  assert.doesNotMatch(programOrderMessage({ item: item(), inCatalog: true }, configured, '', format), /Tarif commande hors catalogue/)
+})
 
 test('un titre au catalogue court-circuite toute recherche externe', async () => {
   const candidate = { item: item(), inCatalog: true }

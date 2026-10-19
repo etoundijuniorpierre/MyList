@@ -74,7 +74,7 @@ function App() {
       supabase.from('price_rules').select('category,standard_price,threshold_seasons,threshold_price,currency'),
       supabase.from('game_price_tiers').select('id,min_gb,max_gb,price,currency').order('min_gb'),
       supabase.from('game_count_discount').select('min_games,price_per_game,currency').eq('id', true).single(),
-      supabase.from('site_settings').select('whatsapp_number').eq('id', true).single(),
+      supabase.from('site_settings').select('*').eq('id', true).single(),
     ])
     setLoadError(pricesResult.error?.message ?? tiersResult.error?.message ?? discountResult.error?.message ?? settingsResult.error?.message ?? '')
     if (pricesResult.data) setPrices(pricesResult.data as PriceRule[])
@@ -295,7 +295,7 @@ function App() {
         <Route path="/selection" element={<SelectionPage loading={cartPending || settingsLoading} pricingError={loadError} onVerifyPricing={refreshSettings} />} />
         <Route path="/commander" element={<OrderPage demo={demoItems} onVerifyPricing={refreshSettings} />} />
         <Route path="/connexion" element={<AuthPage isAdmin={isAdmin} adminReady={adminReady} />} />
-        <Route path="/admin" element={<AdminPage catalogLoading={loading || settingsLoading} user={user} isAdmin={isAdmin} authReady={authReady && adminReady} items={items} prices={prices} gameTiers={gameTiers} gameDiscount={gameDiscount} settings={settings} saves={itemSaves} getItems={getItems} onCommit={commitItems} onChanged={refreshCatalog} onMerged={remapSelection} posterJobRunning={posterJobRunning} onRunPosterJob={runPosterJob} idleMinutes={idleMinutes} onIdleMinutes={setIdleMinutes} onSignOut={signOut} />} />
+        <Route path="/admin" element={<AdminPage catalogLoading={loading || settingsLoading} user={user} isAdmin={isAdmin} authReady={authReady && adminReady} items={items} prices={prices} gameTiers={gameTiers} gameDiscount={gameDiscount} settings={settings} onSettingsChanged={setSettings} saves={itemSaves} getItems={getItems} onCommit={commitItems} onChanged={refreshCatalog} onMerged={remapSelection} posterJobRunning={posterJobRunning} onRunPosterJob={runPosterJob} idleMinutes={idleMinutes} onIdleMinutes={setIdleMinutes} onSignOut={signOut} />} />
         <Route path="*" element={<NotFound />} />
       </Routes></Suspense>
 

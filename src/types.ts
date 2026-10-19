@@ -52,6 +52,14 @@ export interface GameCountDiscount {
 
 export interface SiteSettings {
   whatsapp_number: string
+  order_pricing?: OrderPricing | null
+}
+
+/** Independent rates for requests whose title is absent from the catalog. */
+export interface OrderPricing {
+  prices: PriceRule[]
+  gameTiers: GamePriceTier[]
+  gameDiscount: GameCountDiscount
 }
 
 export interface PricingSettings {

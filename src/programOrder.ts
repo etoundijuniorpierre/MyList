@@ -1,4 +1,5 @@
 import { itemPrice } from './pricing'
+import { orderPricingError } from './orderPricing'
 import { categoryLabel, type CatalogItem, type PricingSettings } from './types'
 
 export interface OrderCandidate {
@@ -22,7 +23,10 @@ export async function catalogFirstSearch(
 }
 
 export function programQuote(candidate: OrderCandidate, settings: PricingSettings) {
-  return itemPrice(candidate.item, [candidate.item], settings.prices, settings.gameTiers, settings.gameDiscount)
+  const custom = !candidate.inCatalog ? settings.settings.order_pricing : null
+  if (custom && orderPricingError(custom)) return null
+  const grid = custom ?? settings
+  return itemPrice(candidate.item, [candidate.item], grid.prices, grid.gameTiers, grid.gameDiscount)
 }
 
 export function programOrderMessage(candidate: OrderCandidate, settings: PricingSettings, name: string, format: (amount: number, currency: string) => string) {
@@ -37,6 +41,7 @@ export function programOrderMessage(candidate: OrderCandidate, settings: Pricing
     candidate.inCatalog ? 'Titre présent au catalogue.' : candidate.catalogChecked === false ? 'Présence au catalogue et disponibilité à confirmer.' : 'Demande hors catalogue : disponibilité à confirmer.',
     pricing ? `${candidate.inCatalog ? 'Prix' : 'Prix estimé, sous réserve de disponibilité'} : ${format(pricing.amount, pricing.currency)}` : 'Prix à confirmer (aucun montant validé).',
     ...(pricing ? [pricing.detail] : []),
+    ...(!candidate.inCatalog && settings.settings.order_pricing ? ['Tarif commande hors catalogue.'] : []),
     ...(!candidate.inCatalog && item.source_url ? [`Référence : ${item.source_url}`] : []),
     '', 'Commande pour ce titre uniquement, hors panier. Merci de confirmer la disponibilité et le montant avant règlement.',
   ].join('\n')
