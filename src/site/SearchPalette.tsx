@@ -6,7 +6,8 @@ import { Cover } from '../media'
 import { categoryMeta, kindLabel, measureLabel } from '../display'
 import { normalizeTitle, type CatalogItem } from '../types'
 import { useSite } from './context'
-import { syncModal } from '../dialogState'
+import { releaseTouchFocus, syncModal } from '../dialogState'
+import { useTouchSearchFocus } from '../useTouchSearchFocus'
 
 const columns = 'id,category,media_type,media_format,title,title_key,synopsis,poster_url,genres,year,source,source_id,source_url,active,seasons_count,game_size_gb'
 
@@ -14,6 +15,7 @@ const columns = 'id,category,media_type,media_format,title,title_key,synopsis,po
 export function SearchPalette({ open, onClose, onChoose, demo }: { open: boolean; onClose: () => void; onChoose: (item: CatalogItem) => void; demo: CatalogItem[] }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const input = useRef<HTMLInputElement>(null)
+  useTouchSearchFocus(input)
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<CatalogItem[]>([])
@@ -48,11 +50,12 @@ export function SearchPalette({ open, onClose, onChoose, demo }: { open: boolean
     // Fermer la recherche native avant d'ouvrir la fiche et garder son résultat
     // en mémoire même si elle ne figure pas sur la première page du catalogue.
     dialog.current?.close()
+    releaseTouchFocus()
     onChoose(item)
     onClose()
     navigate(`${categoryMeta[item.category].route}?titre=${encodeURIComponent(item.id)}`)
   }
-  return <dialog className="search-palette" ref={dialog} aria-label="Rechercher un titre" onCancel={event => { event.preventDefault(); onClose() }} onClose={() => { if (!dialog.current?.open) { onClose(); setQuery('') } }} onClick={(event) => { if (event.target === dialog.current) onClose() }}>
+  return <dialog className="search-palette" ref={dialog} aria-label="Rechercher un titre" onCancel={event => { event.preventDefault(); onClose() }} onClose={() => { if (!dialog.current?.open) { releaseTouchFocus(); onClose(); setQuery('') } }} onClick={(event) => { if (event.target === dialog.current) onClose() }}>
     <div className="palette-box">
       <label className="palette-field"><Search size={20} aria-hidden="true" /><span className="visually-hidden">Titre recherché</span>
         <input ref={input} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Une série, un jeu, un animé…" role="combobox" aria-expanded={results.length > 0} aria-controls="palette-results" aria-activedescendant={results[active] ? `palette-${results[active].id}` : undefined}
@@ -70,7 +73,9 @@ export function SearchPalette({ open, onClose, onChoose, demo }: { open: boolean
           {index === active && <CornerDownLeft size={16} aria-hidden="true" />}
         </li>)}
       </ul>
-      {query.trim().length >= 2 && !busy && !results.length && <p className="palette-empty">Aucun titre ne correspond à « {query.trim()} ».</p>}
+      {query.trim().length >= 2 && !busy && !results.length && <div className="palette-empty"><p>Aucun titre ne correspond à « {query.trim()} ».</p><button type="button" className="button-ghost" onClick={() => {
+        dialog.current?.close(); releaseTouchFocus(); onClose(); navigate(`/commander?${new URLSearchParams({ q: query.trim() })}`)
+      }}>Commander ce titre</button></div>}
       {query.trim().length < 2 && <p className="palette-empty">Tapez au moins deux lettres. <kbd>↑</kbd> <kbd>↓</kbd> pour choisir, <kbd>Entrée</kbd> pour ouvrir.</p>}
     </div>
   </dialog>

@@ -32,6 +32,7 @@ export function HomePage({ demo }: { demo: CatalogItem[] }) {
         <p>Séries, jeux PC, animés, novelas et dramas : composez votre panier en quelques clics et envoyez-le sur WhatsApp. Aucun compte à créer.</p>
         <div className="home-cta">
           <button type="button" className="button-primary button-large" onClick={openSearch}><Search size={18} /> Trouver un titre</button>
+          <Link className="button-ghost button-large" to="/commander"><MessageCircle size={18} /> Passer une commande</Link>
           <a className="button-ghost button-large" href="#univers">Explorer les univers <ArrowRight size={17} /></a>
         </div>
         <p className="home-count" aria-live="polite">{shelves ? `${total.toLocaleString('fr-FR')} titres disponibles` : error ? 'Catalogue momentanément indisponible' : 'Chargement du catalogue…'}</p>

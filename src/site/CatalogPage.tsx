@@ -11,6 +11,7 @@ import { useLightweightDisplay } from '../useLightweightDisplay'
 import { StaticPosterBackdrop } from './StaticPosterBackdrop'
 import { catalogSort, DEFAULT_CATALOG_SORT, type CatalogSort } from '../catalogData'
 import { scrollCatalogStart } from '../catalogScroll'
+import { useTouchSearchFocus } from '../useTouchSearchFocus'
 
 type Sort = CatalogSort
 const sortLabels: Record<Sort, string> = { 'year-desc': 'Année de sortie ↓', 'year-asc': 'Année de sortie ↑', az: 'Titre A → Z', za: 'Titre Z → A', recent: 'Derniers ajouts au catalogue' }
@@ -31,6 +32,7 @@ export function CatalogPage({ category, loading, items: pageItems, total, summar
   const openId = params.get('titre')
   const [search, setSearch] = useState(q)
   const searchInput = useRef<HTMLInputElement>(null)
+  useTouchSearchFocus(searchInput)
   const committedSearch = useRef(q)
   const lightweight = useLightweightDisplay()
   const listStart = useRef<HTMLDivElement>(null)

@@ -22,6 +22,7 @@ import { useItemSaves } from './admin/useItemSaves'
 import { confirmedCatalogItem } from './catalogMutations'
 import { needsCompletion } from './metadataDecisions'
 const AdminPage = lazy(() => import('./AdminPage'))
+const OrderPage = lazy(() => import('./site/OrderPage'))
 
 const demoItems: CatalogItem[] = [
   { id: 'demo-1', category: 'series', media_type: null, title: 'The Last of Us', title_key: titleKey('series', null, 'The Last of Us'), synopsis: 'Un voyage au cœur d’un monde bouleversé.', poster_url: null, genres: ['Drame', 'Science-fiction'], year: 2023, source: 'demo', source_id: null, source_url: null, active: true, seasons_count: 2, game_size_gb: null },
@@ -262,6 +263,7 @@ function App() {
           {categories.map((category) => <NavLink key={category.key} to={categoryMeta[category.key].route} className="nav-link" style={{ '--accent': categoryMeta[category.key].accent } as CSSProperties}>{category.label}</NavLink>)}
         </nav>}
         <div className="header-actions">
+          {!inAdmin && <Link className={`order-link${isAdmin ? ' is-admin' : ''}`} to={routeCat ? `/commander?univers=${routeCat}` : '/commander'} aria-label="Passer une commande">Commander</Link>}
           {!inAdmin && <button type="button" className="search-trigger" onClick={() => setSearchOpen(true)} aria-label="Rechercher un titre (Ctrl + K)"><Search size={17} /><span>Rechercher</span><kbd>Ctrl K</kbd></button>}
           {isAdmin && <Link className={`admin-pill ${path === '/admin' ? 'is-on' : ''}`} to="/admin"><ShieldCheck size={16} /><span>Admin</span></Link>}
           {inAdmin && path === '/admin' && <Link className="admin-pill" to="/"><span>Voir le site</span></Link>}
@@ -291,6 +293,7 @@ function App() {
         {categories.map((category) => <Route key={category.key} path={categoryMeta[category.key].route} element={<CatalogPage category={category.key} loading={loading} items={browseItems} total={browseTotal} summary={browseSummary} years={browseYears} genres={browseGenres} page={browsePage} pageSize={browsePageSize} />} />)}
         <Route path="/animes-mangas" element={<Navigate to="/animes" replace />} />
         <Route path="/selection" element={<SelectionPage loading={cartPending || settingsLoading} pricingError={loadError} onVerifyPricing={refreshSettings} />} />
+        <Route path="/commander" element={<OrderPage demo={demoItems} onVerifyPricing={refreshSettings} />} />
         <Route path="/connexion" element={<AuthPage isAdmin={isAdmin} adminReady={adminReady} />} />
         <Route path="/admin" element={<AdminPage catalogLoading={loading || settingsLoading} user={user} isAdmin={isAdmin} authReady={authReady && adminReady} items={items} prices={prices} gameTiers={gameTiers} gameDiscount={gameDiscount} settings={settings} saves={itemSaves} getItems={getItems} onCommit={commitItems} onChanged={refreshCatalog} onMerged={remapSelection} posterJobRunning={posterJobRunning} onRunPosterJob={runPosterJob} idleMinutes={idleMinutes} onIdleMinutes={setIdleMinutes} onSignOut={signOut} />} />
         <Route path="*" element={<NotFound />} />
@@ -313,7 +316,7 @@ function App() {
 
       {!inAdmin && <footer className="site-footer">
         <div className="footer-brand-block"><span className="footer-brand">MA LISTE<span>.</span></span><p>Votre prochaine découverte commence ici.</p></div>
-        <nav className="footer-links" aria-label="Univers">{categories.map((category) => <Link key={category.key} to={categoryMeta[category.key].route}>{category.label}</Link>)}<Link to="/selection">Mon panier</Link></nav>
+        <nav className="footer-links" aria-label="Univers">{categories.map((category) => <Link key={category.key} to={categoryMeta[category.key].route}>{category.label}</Link>)}<Link to="/selection">Mon panier</Link><Link to="/commander">Passer une commande</Link></nav>
         <p className="source-credit">Fiches : <a href="https://www.tvmaze.com/" target="_blank" rel="noopener noreferrer">TVMaze</a> · <a href="https://www.thetvdb.com/" target="_blank" rel="noopener noreferrer">TheTVDB</a> · <a href="https://anilist.co/" target="_blank" rel="noopener noreferrer">AniList</a> · <a href="https://jikan.moe/" target="_blank" rel="noopener noreferrer">Jikan</a> · <a href="https://kitsu.io/" target="_blank" rel="noopener noreferrer">Kitsu</a> · <a href="https://www.igdb.com/" target="_blank" rel="noopener noreferrer">IGDB</a> · <a href="https://rawg.io/" target="_blank" rel="noopener noreferrer">RAWG</a> · <a href="https://store.steampowered.com/" target="_blank" rel="noopener noreferrer">Steam</a> · <a href="https://www.wikipedia.org/" target="_blank" rel="noopener noreferrer">Wikipédia</a></p>
         <div className="footer-bottom"><small>© {new Date().getFullYear()} Ma Liste</small><Link className="private-link" to={isAdmin ? '/admin' : '/connexion'}><LockKeyhole size={12} aria-hidden="true" /> Espace privé</Link></div>
       </footer>}
