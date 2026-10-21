@@ -23,7 +23,7 @@ export interface Candidate {
   notes: string[]
 }
 
-const sourceRank: Record<string, number> = { anilist: 0, 'jikan-anime': 1, tvmaze: 0, tvdb: 1, igdb: 0, rawg: 1, kitsu: 2, steam: 2, wikipedia: 8 }
+const sourceRank: Record<string, number> = { anilist: 0, 'jikan-anime': 1, tvmaze: 0, tvdb: 1, igdb: 0, rawg: 1, kitsu: 2, steam: 2, nautiljon: 3, wikipedia: 8 }
 
 /**
  * Titres à essayer pour une fiche au nom de dossier : nettoyé, sans sous-titre français, chaque moitié

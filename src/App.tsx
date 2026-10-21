@@ -272,7 +272,7 @@ function App() {
   }, [selectedItems, selection.length, prices, gameTiers, gameDiscount, settingsLoading, loadError])
 
   const site: SiteState = {
-    items, selection, selectedItems, toggle, seasonChoices: cartSelection.seasons, setSeasons, clearSelection: () => setSelection([]),
+    items, selection, selectedItems, toggle, seasonChoices: cartSelection.seasons, setSeasons, updateCatalogItem: item => commitItems([item]), clearSelection: () => setSelection([]),
     prices, gameTiers, gameDiscount, settings, isAdmin, openSearch: () => setSearchOpen(true), notify, registerToastHost,
   }
   const path = location.pathname

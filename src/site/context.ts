@@ -9,6 +9,7 @@ export interface SiteState {
   selectedItems: CartItem[]
   seasonChoices: Record<string, number[]>
   setSeasons: (item: CatalogItem, numbers: number[] | null) => void
+  updateCatalogItem: (item: CatalogItem) => void
   toggle: (item: Pick<CatalogItem, 'id' | 'title'>) => void
   clearSelection: () => void
   prices: PriceRule[]

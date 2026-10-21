@@ -13,6 +13,7 @@ type TvShow = { show: { id: number; name: string; summary: string | null; premie
 type AnimeSearch = { data: { mal_id: number; title: string; title_english?: string | null; title_synonyms?: string[]; type?: string | null; synopsis: string | null; year?: number | null; aired?: { from: string | null }; genres: { name: string }[]; images?: { jpg?: { large_image_url?: string; image_url?: string } }; url: string }[] }
 type AniListSearch = { results: { id: string; title: string; aliases: string[]; format: string | null; synopsis: string | null; year: number | null; poster_url: string | null; genres: string[] }[] }
 type KitsuSearch = { results: { id: string; title: string; aliases: string[]; format: string | null; synopsis: string | null; year: number | null; poster_url: string | null }[] }
+type NautiljonSearch = { results: { id: string; title: string; format: MediaFormat; year: number | null; poster_url: string | null; source_url: string }[] }
 type GameSearch = { results: { id: number; name: string; released: string | null; background_image: string | null; genres: { name: string }[]; slug: string; source?: 'rawg' | 'igdb'; source_url?: string }[] }
 type TvdbSearch = { results: { id: string; name: string; aliases: string[]; overview: string | null; released: string | null; poster_url: string | null; genres: string[] }[] }
 type WikiPage = { pageid: number; title: string; index?: number; pageimage?: string; thumbnail?: { source: string }; terms?: { description?: string[] } }
@@ -22,6 +23,7 @@ const cachedSearches = new Map<string, Promise<MetadataResult[]>>()
 let rawgUnavailableUntil = 0
 let tvdbUnavailableUntil = 0
 let jikanUnavailableUntil = 0
+let nautiljonUnavailableUntil = 0
 let jikanQueue: Promise<void> = Promise.resolve()
 let nextJikanRequestAt = 0
 let aniListQueue: Promise<void> = Promise.resolve()
@@ -93,6 +95,17 @@ async function kitsu(query: string): Promise<MetadataResult[]> {
     aliases: anime.aliases,
     match: anime.aliases.some((title) => isExactTitle(title, query)) ? 'exact' : 'approximate',
   }))
+}
+
+async function nautiljon(query: string): Promise<MetadataResult[]> {
+  if (Date.now() < nautiljonUnavailableUntil) throw new Error('Nautiljon est temporairement indisponible.')
+  let response: NautiljonSearch
+  try { response = await getJson<NautiljonSearch>(`/api/nautiljon-search?q=${encodeURIComponent(searchQueries(query)[0])}`) }
+  catch (error) { nautiljonUnavailableUntil = Date.now() + 60_000; throw error }
+  return response.results.map(row => ({ category: 'anime', media_type: 'anime', media_format: row.format,
+    title: row.title, title_key: titleKey('anime', 'anime', row.title, row.format), synopsis: null, poster_url: row.poster_url,
+    genres: [], year: row.year, source: 'nautiljon', source_id: row.id, source_url: row.source_url,
+    active: true, seasons_count: null, game_size_gb: null, aliases: [], match: isExactTitle(row.title, query) ? 'exact' : 'approximate' }))
 }
 
 function plainText(html: string | null): string | null {
@@ -261,6 +274,10 @@ async function lookup(query: string, category: Category, format: MediaFormat = n
         try { main = mergeMetadataResults(main, await kitsu(query)); publicSourceResponded = true }
         catch { /* Kitsu complète les catalogues publics sans clé. */ }
       }
+      if (!hasAnimePoster(main, format, year)) {
+        try { main = mergeMetadataResults(main, await nautiljon(query)); publicSourceResponded = true }
+        catch { /* The public form is an optional source, never a reason to lose other results. */ }
+      }
       if (!hasAnimePoster(main, format, year) && format !== 'film') main = mergeMetadataResults(main, await tvdb(query, 'anime'))
       if (!publicSourceResponded && !hasAnimePoster(main, format, year)) throw new Error('Les sources d’affiches anime sont temporairement indisponibles. Reprenez la recherche plus tard.')
     }
@@ -309,6 +326,7 @@ const posterHosts = [
   'static.tvmaze.com', 'cdn.myanimelist.net', 'media.rawg.io', 'images.igdb.com', 'upload.wikimedia.org',
   'cdn.akamai.steamstatic.com', 'shared.akamai.steamstatic.com', 'artworks.thetvdb.com',
   's1.anilist.co', 's2.anilist.co', 's3.anilist.co', 's4.anilist.co', 'media.kitsu.app',
+  'www.nautiljon.com', 'nautiljon.com',
 ]
 
 export function isCachedPosterUrl(url: string | null): boolean {
@@ -377,6 +395,10 @@ export async function findCandidates(item: CatalogItem, query?: string): Promise
       attempts++
       if (outcome.status === 'fulfilled') results = mergeMetadataResults(results, outcome.value)
       else failures++
+    }
+    if (item.category === 'anime' && !hasAnimePoster(results, item.media_format ?? null, item.year)) {
+      attempts++
+      try { results = mergeMetadataResults(results, await nautiljon(variant)) } catch { failures++ }
     }
   }
   if (attempts && failures === attempts) throw new Error('Les sources de fiches ne répondent pas pour le moment. Reprenez plus tard.')

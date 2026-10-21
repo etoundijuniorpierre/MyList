@@ -20,7 +20,7 @@ export function acceptedPreferences(item: CatalogItem, candidate: Candidate, tit
 /** Réutilise aussi les identifiants déjà enregistrés avant cette migration. */
 export function retainedCandidate(item: CatalogItem): Candidate | null {
   if (item.metadata_preferences?.match) return item.metadata_preferences.match
-  if (item.metadata_preferences?.ignore_source || item.metadata_preferences?.rejected || !item.source_id || !['tvmaze', 'tvdb', 'anilist', 'jikan-anime', 'kitsu', 'rawg', 'igdb', 'steam'].includes(item.source)) return null
+  if (item.metadata_preferences?.ignore_source || item.metadata_preferences?.rejected || !item.source_id || !['tvmaze', 'tvdb', 'anilist', 'jikan-anime', 'kitsu', 'rawg', 'igdb', 'steam', 'nautiljon'].includes(item.source)) return null
   return { key: `${item.source}:${item.source_id}`, title: item.title, aliases: [], year: item.year,
     format: item.media_format ?? (item.category === 'games' ? null : 'series'), category: item.category,
     poster_url: item.poster_url, synopsis: item.synopsis, genres: item.genres, source: item.source, source_id: item.source_id,

@@ -11,6 +11,7 @@ export function formatPrice(amount: number, currency: string) {
 }
 
 const sourceNames: Record<string, string> = {
+  nautiljon: 'Nautiljon', allocine: 'Allociné',
   tvmaze: 'TVMaze', tvdb: 'TheTVDB', tmdb: 'TMDB', rawg: 'RAWG', igdb: 'IGDB', steam: 'Steam', anilist: 'AniList', kitsu: 'Kitsu', 'jikan-anime': 'MyAnimeList', gog: 'GOG', 'gog-dreamlist': 'GOG Dreamlist', nintendo: 'Nintendo', 'square-enix': 'Square Enix', mobygames: 'MobyGames',
 }
 

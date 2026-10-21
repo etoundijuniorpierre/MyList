@@ -16,6 +16,8 @@ const allowedHosts = new Set([
   's3.anilist.co',
   's4.anilist.co',
   'media.kitsu.app',
+  'www.nautiljon.com',
+  'nautiljon.com',
 ])
 const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const maxBytes = 5 * 1024 * 1024

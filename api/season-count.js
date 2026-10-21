@@ -60,7 +60,7 @@ export default async function handler(request, response) {
   const titles = [...new Set([params.get('title'), ...params.getAll('alias')].filter(Boolean))].slice(0, 3)
   const year = params.get('year') ? Number(params.get('year')) : null
   const category = params.get('category')
-  if (!['tvmaze', 'tvdb', 'anilist', 'jikan-anime', 'kitsu', 'wikipedia'].includes(source) || !titles.length || titles.some(title => title.length < 2 || title.length > 160)
+  if (!['tvmaze', 'tvdb', 'anilist', 'jikan-anime', 'kitsu', 'wikipedia', 'nautiljon'].includes(source) || !titles.length || titles.some(title => title.length < 2 || title.length > 160)
     || (id && !/^\d{1,12}$/.test(id)) || (year !== null && (!Number.isInteger(year) || year < 1850 || year > 2200))
     || !['anime', 'series', 'novelas', 'dramas'].includes(category)) return response.status(400).json({ error: 'Fiche de saison invalide.' })
   const input = { source, id, titles, year, category }

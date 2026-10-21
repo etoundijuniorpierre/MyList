@@ -11,7 +11,7 @@ export async function completeSeasonDetails(item: CatalogItem, binding: Candidat
   const candidate = binding ?? retainedCandidate(item)
   if (!candidate || !authorized()) return item
   const identities = [...(candidate.identities ?? []), { source: candidate.source, id: candidate.source_id ?? '' }]
-  const identity = identities.find(entry => entry.source === (item.category === 'anime' ? 'anilist' : 'tvmaze')) ?? identities.find(entry => ['tvmaze', 'anilist', 'jikan-anime', 'tvdb', 'kitsu', 'wikipedia'].includes(entry.source))
+  const identity = identities.find(entry => entry.source === (item.category === 'anime' ? 'anilist' : 'tvmaze')) ?? identities.find(entry => ['tvmaze', 'anilist', 'jikan-anime', 'tvdb', 'kitsu', 'wikipedia', 'nautiljon'].includes(entry.source))
   if (!identity) return item
   const params = new URLSearchParams({ source: identity.source, id: /^\d+$/.test(identity.id) ? identity.id : '', title: candidate.title.slice(0, 160), category: item.category })
   if (candidate.year) params.set('year', String(candidate.year))

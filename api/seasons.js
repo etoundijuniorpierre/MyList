@@ -6,7 +6,7 @@ export default async function handler(request, response) {
   const titles = [...new Set([params.get('title'), ...params.getAll('alias')].filter(Boolean))].slice(0, 3)
   const year = params.get('year') ? Number(params.get('year')) : null
   const expected = params.get('expected') === null ? null : Number(params.get('expected'))
-  if (!['series', 'anime'].includes(category) || !['tvmaze', 'tvdb', 'anilist', 'jikan-anime', 'kitsu', 'wikipedia'].includes(source)
+  if (!['series', 'anime'].includes(category) || !['tvmaze', 'tvdb', 'anilist', 'jikan-anime', 'kitsu', 'wikipedia', 'nautiljon'].includes(source)
     || (id && !/^\d{1,12}$/.test(id)) || !titles.length || titles.some(title => title.length < 2 || title.length > 160)
     || (year !== null && (!Number.isInteger(year) || year < 1850 || year > 2200))
     || (expected !== null && (!Number.isInteger(expected) || expected < 1 || expected > 999))) return response.status(400).json({ error: 'Référence de saisons invalide.' })
