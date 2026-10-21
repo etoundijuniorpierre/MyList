@@ -10,3 +10,8 @@ netlify/
 scripts/
 .poster-candidates.json
 .game-year-research.jsonl
+.wiki-candidates.jsonl
+.tmp/
+.venv-translation/
+.translation-packages/
+pagination-production-check.png
