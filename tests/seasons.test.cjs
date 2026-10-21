@@ -160,6 +160,20 @@ test('la recherche de saisons refuse les références arbitraires avant tout app
     assert.equal(response.code, 400)
   }
 })
+
+test('un fournisseur bloqué ne fait pas perdre les saisons déjà trouvées par un autre fournisseur', async () => {
+  const { resolveSeasonDetails } = await import('../lib/seasonSources.mjs')
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 20)
+  try {
+    const result = await resolveSeasonDetails({ source: 'tvmaze', id: '1', category: 'anime', titles: ['Example Saga'], year: 2020, expected: 2 }, async (url, options) => {
+      if (url.includes('api.tvmaze')) return { ok: true, json: async () => [{ id: 1, number: 1, premiereDate: '2020-01-01', image: { original: 'https://example.com/1.jpg' } }] }
+      return new Promise((resolve, reject) => { options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true }) })
+    }, controller.signal)
+    assert.equal(result.seasons.length, 1)
+    assert.equal(result.seasons[0].poster_url, 'https://example.com/1.jpg')
+  } finally { clearTimeout(timer) }
+})
 test('une panne des saisons ne transforme pas une fiche déjà enregistrée en échec et reste signalée pour reprise', async () => {
   const Module = require('node:module')
   const original = Module._load
