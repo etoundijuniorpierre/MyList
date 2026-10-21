@@ -24,6 +24,30 @@ export interface CatalogItem {
   metadata_preferences?: import('./metadataDecisions').MetadataPreferences
   seasons_total?: number | null
   seasons_checked_at?: string | null
+  available_seasons?: number[] | null
+  season_details_checked_at?: string | null
+  season_details_note?: string | null
+}
+
+export interface CatalogSeason {
+  item_id: string
+  number: number
+  title: string | null
+  synopsis?: string | null
+  poster_url: string | null
+  year: number | null
+  source: string | null
+  source_id: string | null
+  source_url: string | null
+  manual: boolean
+  updated_at?: string
+}
+
+/** Projection for pricing only; never written back to catalog_items. */
+export interface CartItem extends CatalogItem {
+  cart_seasons?: number[]
+  cart_all_seasons?: boolean
+  selection_error?: string
 }
 
 export type ItemInput = Omit<CatalogItem, 'id' | 'created_at'>

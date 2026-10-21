@@ -21,6 +21,7 @@ import { scrollPageForNavigation } from './catalogScroll'
 import { useItemSaves } from './admin/useItemSaves'
 import { confirmedCatalogItem } from './catalogMutations'
 import { needsCompletion } from './metadataDecisions'
+import { CART_KEY, cartItems, cleanCartSelection, readCartSelection, remapCartSelection, restoreCartItem, selectItemSeasons, type CartSelection } from './seasonSelection'
 const AdminPage = lazy(() => import('./AdminPage'))
 const OrderPage = lazy(() => import('./site/OrderPage'))
 
@@ -33,10 +34,6 @@ const demoItems: CatalogItem[] = [
   { id: 'demo-6', category: 'anime', media_type: 'anime', title: 'Demon Slayer', title_key: titleKey('anime', 'anime', 'Demon Slayer'), synopsis: 'Une quête fantastique et familiale.', poster_url: null, genres: ['Action', 'Fantastique'], year: 2019, source: 'demo', source_id: null, source_url: null, active: true, seasons_count: 4, game_size_gb: null },
   { id: 'demo-7', category: 'novelas', media_type: null, title: 'La Reina del Sur', title_key: titleKey('novelas', null, 'La Reina del Sur'), synopsis: 'Une histoire de pouvoir et de survie.', poster_url: null, genres: ['Drame'], year: 2011, source: 'demo', source_id: null, source_url: null, active: true, seasons_count: 3, game_size_gb: null },
 ]
-
-function getSelection(): string[] {
-  try { const value = JSON.parse(localStorage.getItem('mylist-selection') ?? '[]'); return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [] } catch { return [] }
-}
 
 export type PosterJobKind = PosterJob['kind']
 
@@ -52,7 +49,15 @@ function App() {
   const [settingsLoading, setSettingsLoading] = useState(isConfigured)
   const [loadError, setLoadError] = useState('')
   const [posterJob, setPosterJob] = useState<PosterJob | null>(readPosterJob)
-  const [selection, setSelection] = useState<string[]>(getSelection)
+  const [cartSelection, setCartSelection] = useState<CartSelection>(() => { try { return readCartSelection(localStorage) } catch { return { ids: [], seasons: {} } } })
+  const selection = cartSelection.ids
+  const cartRef = useRef(cartSelection)
+  cartRef.current = cartSelection
+  const commitCart = useCallback((next: CartSelection) => { cartRef.current = next; setCartSelection(next) }, [])
+  const setSelection = useCallback((next: string[] | ((before: string[]) => string[])) => {
+    const before = cartRef.current
+    commitCart(cleanCartSelection({ ...before, ids: typeof next === 'function' ? next(before.ids) : next }))
+  }, [commitCart])
   const [menuOpen, setMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -193,7 +198,7 @@ function App() {
   })
   const idle = useIdleLogout(isAdmin, posterJobRunning || itemSaves.pending.length > 0, idleMinutes, () => void signOut('inactivite'))
 
-  useEffect(() => { try { localStorage.setItem('mylist-selection', JSON.stringify(selection)) } catch { /* Le panier reste en mémoire. */ } }, [selection])
+  useEffect(() => { try { localStorage.setItem(CART_KEY, JSON.stringify(cartSelection)); localStorage.setItem('mylist-selection', JSON.stringify(selection)) } catch { /* Le panier reste en mémoire. */ } }, [cartSelection, selection])
   // Un titre retiré du catalogue disparaît aussi des paniers enregistrés.
   useEffect(() => { if (missing.size) setSelection(current => current.filter(id => !missing.has(id))) }, [missing])
   useEffect(() => { setMenuOpen(false); setSearchOpen(false) }, [location.pathname])
@@ -224,21 +229,42 @@ function App() {
     setToasts(current => [...current.slice(-2), { id, text, action }])
     window.setTimeout(() => setToasts(current => current.filter(toast => toast.id !== id)), 4500)
   }, [])
-  const selectionRef = useRef(selection)
-  selectionRef.current = selection
   const toggle = useCallback((item: Pick<CatalogItem, 'id' | 'title'>) => {
-    const before = selectionRef.current
-    const removing = before.includes(item.id)
-    setSelection(removing ? before.filter(entry => entry !== item.id) : [...before, item.id])
+    const before = cartRef.current
+    const removing = before.ids.includes(item.id)
+    commitCart(cleanCartSelection({ ...before, ids: removing ? before.ids.filter(entry => entry !== item.id) : [...before.ids, item.id] }))
     setCartBump(value => value + 1)
-    notify(removing ? `« ${item.title} » retiré du panier` : `« ${item.title} » ajouté au panier`, { label: 'Annuler', run: () => setSelection(before) })
-  }, [notify])
+    notify(removing ? `« ${item.title} » retiré du panier` : `« ${item.title} » ajouté au panier`, { label: 'Annuler', run: () => commitCart(restoreCartItem(cartRef.current, before, item.id)) })
+  }, [notify, commitCart])
+  const setSeasons = useCallback((item: CatalogItem, numbers: number[] | null) => {
+    const before = cartRef.current
+    rememberItem(item)
+    commitCart(selectItemSeasons(before, item, numbers))
+    setCartBump(value => value + 1)
+    notify(numbers?.length === 0 ? `« ${item.title} » retiré du panier` : `Choix des saisons de « ${item.title} » enregistré`, { label: 'Annuler', run: () => commitCart(restoreCartItem(cartRef.current, before, item.id)) })
+  }, [rememberItem, commitCart, notify])
   const remapSelection = useCallback((removedId: string, keptId: string) => {
-    setSelection(current => [...new Set(current.map(id => id === removedId ? keptId : id))])
-  }, [])
+    commitCart(remapCartSelection(cartRef.current, removedId, keptId))
+  }, [commitCart])
 
   const activeItems = useMemo(() => items.filter((item) => item.active), [items])
-  const selectedItems = useMemo(() => selection.map((id) => activeItems.find((item) => item.id === id)).filter((item): item is CatalogItem => Boolean(item)), [selection, activeItems])
+  const selectedItems = useMemo(() => cartItems(activeItems, cartSelection), [cartSelection, activeItems])
+  async function verifyCartItems() {
+    const snapshot = cartRef.current
+    if (!supabase) return cartItems(getItems(), snapshot)
+    const rows: CatalogItem[] = []
+    for (let offset = 0; offset < snapshot.ids.length; offset += 100) {
+      const result = await supabase.from('catalog_items').select('*').eq('active', true).in('id', snapshot.ids.slice(offset, offset + 100)).abortSignal(AbortSignal.timeout(8000))
+      if (result.error) throw new Error('La disponibilité des saisons n’a pas pu être vérifiée. Réessayez.')
+      rows.push(...result.data as CatalogItem[])
+    }
+    if (cartRef.current !== snapshot) throw new Error('Le panier a changé pendant la vérification. Relancez l’envoi.')
+    commitItems(rows)
+    if (rows.length !== snapshot.ids.length) throw new Error('Un titre n’est plus disponible. Actualisez votre panier.')
+    const projected = cartItems(rows, snapshot)
+    if (projected.some(item => item.selection_error)) throw new Error('Une saison choisie n’est plus disponible. Modifiez votre choix avant l’envoi.')
+    return projected
+  }
   const cartTotal = useMemo(() => {
     if (!selectedItems.length || selectedItems.length !== selection.length || settingsLoading || loadError) return null
     const cart = calculateCart(selectedItems, prices, gameTiers, gameDiscount)
@@ -246,7 +272,7 @@ function App() {
   }, [selectedItems, selection.length, prices, gameTiers, gameDiscount, settingsLoading, loadError])
 
   const site: SiteState = {
-    items, selection, selectedItems, toggle, clearSelection: () => setSelection([]),
+    items, selection, selectedItems, toggle, seasonChoices: cartSelection.seasons, setSeasons, clearSelection: () => setSelection([]),
     prices, gameTiers, gameDiscount, settings, isAdmin, openSearch: () => setSearchOpen(true), notify, registerToastHost,
   }
   const path = location.pathname
@@ -292,7 +318,7 @@ function App() {
         <Route path="/" element={<HomePage demo={demoItems} />} />
         {categories.map((category) => <Route key={category.key} path={categoryMeta[category.key].route} element={<CatalogPage category={category.key} loading={loading} items={browseItems} total={browseTotal} summary={browseSummary} years={browseYears} genres={browseGenres} page={browsePage} pageSize={browsePageSize} />} />)}
         <Route path="/animes-mangas" element={<Navigate to="/animes" replace />} />
-        <Route path="/selection" element={<SelectionPage loading={cartPending || settingsLoading} pricingError={loadError} onVerifyPricing={refreshSettings} />} />
+        <Route path="/selection" element={<SelectionPage loading={cartPending || settingsLoading} pricingError={loadError} onVerifyPricing={refreshSettings} onVerifyItems={verifyCartItems} />} />
         <Route path="/commander" element={<OrderPage demo={demoItems} onVerifyPricing={refreshSettings} />} />
         <Route path="/connexion" element={<AuthPage isAdmin={isAdmin} adminReady={adminReady} />} />
         <Route path="/admin" element={<AdminPage catalogLoading={loading || settingsLoading} user={user} isAdmin={isAdmin} authReady={authReady && adminReady} items={items} prices={prices} gameTiers={gameTiers} gameDiscount={gameDiscount} settings={settings} onSettingsChanged={setSettings} saves={itemSaves} getItems={getItems} onCommit={commitItems} onChanged={refreshCatalog} onMerged={remapSelection} posterJobRunning={posterJobRunning} onRunPosterJob={runPosterJob} idleMinutes={idleMinutes} onIdleMinutes={setIdleMinutes} onSignOut={signOut} />} />

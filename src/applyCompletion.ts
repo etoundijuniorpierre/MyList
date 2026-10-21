@@ -3,6 +3,7 @@ import { safeUrl, translateSynopsisToFrench } from './media'
 import { supabase } from './supabase'
 import type { CatalogItem } from './types'
 import { completionPatch } from './completionPlan'
+import { completeSeasonDetails } from './completeSeasonDetails'
 
 /**
  * Écrit les champs trouvés sans jamais écraser une valeur existante, puis copie l'affiche sur Supabase
@@ -11,6 +12,15 @@ import { completionPatch } from './completionPlan'
 export async function applyCompletion(item: CatalogItem, found: Completion, authorized: () => boolean = () => true, extra: Record<string, unknown> = {}): Promise<{ updated: number; stored: number; stillMissing: boolean; item?: CatalogItem }> {
   if (!supabase) throw new Error('Supabase n’est pas configuré.')
   if (!authorized()) throw new Error('Session interrompue')
+  const finishSeasons = async (row: CatalogItem) => {
+    try { return await completeSeasonDetails(row, found.binding, authorized) }
+    catch (error) {
+      // The confirmed parent edit remains successful during a provider outage.
+      // The existing job retry path will resume only the missing season work.
+      found.seasons_error = error instanceof Error ? error.message : 'Détails des saisons à reprendre.'
+      return row
+    }
+  }
   const current = await supabase.from('catalog_items').select('*').eq('id', item.id).maybeSingle()
   if (current.error) throw current.error
   if (!current.data) throw new Error('Cette fiche n’existe plus.')
@@ -18,7 +28,10 @@ export async function applyCompletion(item: CatalogItem, found: Completion, auth
   if (!extra.metadata_preferences && (live.metadata_preferences?.rejected || live.title !== item.title || live.metadata_preferences?.match?.key !== item.metadata_preferences?.match?.key)) return { updated: 0, stored: 0, stillMissing: false }
   const poster = found.poster_url ? safeUrl(found.poster_url) : undefined
   const patch = completionPatch(live, { ...found, poster_url: poster, source_url: safeUrl(found.source_url ?? null) ?? null }, extra)
-  if (!Object.keys(patch).length) return { updated: 0, stored: 0, stillMissing: false }
+  if (!Object.keys(patch).length) {
+    const completed = await finishSeasons(live)
+    return { updated: Number(completed !== live), stored: 0, stillMissing: false, item: completed }
+  }
   if (!authorized()) throw new Error('Session interrompue')
   let write = supabase.from('catalog_items').update(patch).eq('id', item.id)
   if (live.updated_at) write = write.eq('updated_at', live.updated_at)
@@ -41,5 +54,6 @@ export async function applyCompletion(item: CatalogItem, found: Completion, auth
   }
   const stillMissing = !completedItem.poster_url || !completedItem.synopsis?.trim() || !completedItem.genres.length || !completedItem.year
     || (completedItem.category !== 'games' && completedItem.media_format !== 'film' && !completedItem.seasons_total)
+  completedItem = await finishSeasons(completedItem)
   return { updated: 1, stored: Number(Boolean(followUp.poster_url)), stillMissing, item: completedItem }
 }

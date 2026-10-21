@@ -1,12 +1,14 @@
 import { createContext, useContext } from 'react'
-import type { CatalogItem, GameCountDiscount, GamePriceTier, PriceRule, SiteSettings } from '../types'
+import type { CartItem, CatalogItem, GameCountDiscount, GamePriceTier, PriceRule, SiteSettings } from '../types'
 
 export interface Toast { id: number; text: string; action?: { label: string; run: () => void } }
 
 export interface SiteState {
   items: CatalogItem[]
   selection: string[]
-  selectedItems: CatalogItem[]
+  selectedItems: CartItem[]
+  seasonChoices: Record<string, number[]>
+  setSeasons: (item: CatalogItem, numbers: number[] | null) => void
   toggle: (item: Pick<CatalogItem, 'id' | 'title'>) => void
   clearSelection: () => void
   prices: PriceRule[]

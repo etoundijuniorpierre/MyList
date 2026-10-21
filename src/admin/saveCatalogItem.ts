@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { catalogIdentity, isCatalogNoiseTitle, mergeCatalogUpdate, sameCatalogTitle } from '../catalogImport'
 import { safeUrl } from '../urls'
 import { titleKey, type CatalogItem, type ItemInput } from '../types'
+import { validSeasonNumbers } from '../seasonSelection'
 
 export function cleanItemInput(input: ItemInput): ItemInput {
   const mediaType = input.category === 'anime' ? 'anime' : input.category === 'dramas' ? input.media_type : null
@@ -14,6 +15,7 @@ export function cleanItemInput(input: ItemInput): ItemInput {
     source: input.source, source_id: input.source_id, year: input.year, active: input.active,
     seasons_count: input.category === 'games' || (input.category === 'anime' && input.media_format === 'film') ? null : input.seasons_count,
     game_size_gb: input.category === 'games' ? input.game_size_gb : null,
+    ...('available_seasons' in input ? { available_seasons: input.available_seasons?.length ? validSeasonNumbers(input.available_seasons) : null } : {}),
   }
 }
 
@@ -44,6 +46,10 @@ export async function saveCatalogItem(client: SupabaseClient, input: ItemInput, 
   const payload = { ...mergeCatalogUpdate(clean, existing, id && duplicate ? edited : undefined),
     title: duplicate ? duplicate.title : manual ? clean.title : existing ? existing.title : clean.title,
     title_key: duplicate ? duplicate.title_key : manual ? clean.title_key : existing?.title_key ?? clean.title_key,
+  }
+  if (existing && (payload.seasons_count !== existing.seasons_count || ('available_seasons' in clean && JSON.stringify(clean.available_seasons) !== JSON.stringify(existing.available_seasons)))) {
+    payload.season_details_checked_at = null
+    if (!('available_seasons' in clean)) payload.available_seasons = null
   }
   if (manual) {
     payload.metadata_preferences = { ...edited?.metadata_preferences, ...existing?.metadata_preferences, title: payload.title }

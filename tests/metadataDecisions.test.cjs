@@ -112,6 +112,8 @@ test('un titre renommé reprend les genres depuis son identifiant TVMaze sans no
 test('le total manquant déclenche une recherche même si affiche, description et genres sont présents', () => {
   assert.equal(needsCompletion(row()), true)
   const checked = row({ seasons_total: 5, seasons_checked_at: new Date().toISOString() })
+  assert.equal(needsCompletion(checked), true, 'les saisons détaillées doivent aussi être complétées')
+  checked.season_details_checked_at = new Date().toISOString()
   assert.equal(needsCompletion(checked), false)
   assert.equal(needsSeasonLookup(row({ category: 'games' })), false)
   assert.equal(needsSeasonLookup(row({ media_format: 'film' })), false)

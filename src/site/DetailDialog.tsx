@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type CSSProperties } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, type CSSProperties } from 'react'
 import { ChevronLeft, ChevronRight, ExternalLink, Heart, Settings, X } from 'lucide-react'
 import { Cover, formatPrice, safeUrl, sourceLabel } from '../media'
 import { itemPrice } from '../pricing'
@@ -6,6 +6,8 @@ import { categoryMeta, kindLabel, measureLabel } from '../display'
 import type { CatalogItem } from '../types'
 import { useSite } from './context'
 import { isDialogDismissal, syncModal } from '../dialogState'
+import { cartItems, hasSeasonChoices } from '../seasonSelection'
+const SeasonPicker = lazy(() => import('./SeasonPicker'))
 
 interface Props {
   item: CatalogItem | null
@@ -17,7 +19,7 @@ interface Props {
 
 export function DetailDialog({ item, list, onNavigate, onClose, onEdit }: Props) {
   const dialog = useRef<HTMLDialogElement>(null)
-  const { selection, toggle, prices, gameTiers, gameDiscount, registerToastHost } = useSite()
+  const { selection, seasonChoices, selectedItems, toggle, prices, gameTiers, gameDiscount, registerToastHost } = useSite()
   const hasItem = Boolean(item)
   useEffect(() => syncModal(dialog.current, hasItem, registerToastHost), [hasItem, registerToastHost])
   const index = item ? list.findIndex((entry) => entry.id === item.id) : -1
@@ -41,7 +43,8 @@ export function DetailDialog({ item, list, onNavigate, onClose, onEdit }: Props)
       .filter(({ score }) => score >= 1).sort((a, b) => b.score - a.score).slice(0, 6).map(({ entry }) => entry)
   }, [item, list])
   const selected = item ? selection.includes(item.id) : false
-  const price = item ? itemPrice(item, [item], prices, gameTiers, gameDiscount) : null
+  const pricedItem = item ? cartItems([item], { ids: [item.id], seasons: selection.includes(item.id) ? seasonChoices : {} })[0] : null
+  const price = pricedItem ? itemPrice(pricedItem, selected ? selectedItems : [pricedItem], prices, gameTiers, gameDiscount) : null
   const backdrop = item ? safeUrl(item.poster_url) : undefined
   const meta = item ? categoryMeta[item.category] : null
   return <dialog className="detail-dialog" ref={dialog} aria-labelledby="detail-title" onCancel={event => { event.preventDefault(); onClose() }} onClose={() => { if (isDialogDismissal(dialog.current, hasItem)) onClose() }} onClick={(event) => { if (event.target === dialog.current) onClose() }}>
@@ -54,6 +57,7 @@ export function DetailDialog({ item, list, onNavigate, onClose, onEdit }: Props)
         <h2 id="detail-title">{item.title}</h2>
         <div className="chips"><span className="chip">{item.year ?? 'Année inconnue'}</span><span className="chip">{measureLabel(item)}</span>{item.genres.slice(0, 4).map((genre) => <span className="chip chip-ghost" key={genre}>{genre}</span>)}</div>
         <p className="detail-synopsis">{item.synopsis || 'La description de ce titre arrive bientôt.'}</p>
+        {hasSeasonChoices(item) && <Suspense fallback={<p role="status">Préparation des saisons…</p>}><SeasonPicker key={item.id} item={item} /></Suspense>}
         <div className="detail-price"><span>Prix indicatif</span><strong>{price ? formatPrice(price.amount, price.currency) : 'Sur demande'}</strong>{price && <small>{price.detail} · les remises de volume s’appliquent dans le panier</small>}</div>
         <div className="detail-actions">
           <button type="button" className={`button-primary ${selected ? 'is-on' : ''}`} onClick={() => toggle(item)}><Heart size={17} fill={selected ? 'currentColor' : 'none'} /> {selected ? 'Retirer du panier' : 'Ajouter au panier'}</button>

@@ -9,7 +9,7 @@ import { useSite } from './context'
 import { releaseTouchFocus, syncModal } from '../dialogState'
 import { useTouchSearchFocus } from '../useTouchSearchFocus'
 
-const columns = 'id,category,media_type,media_format,title,title_key,synopsis,poster_url,genres,year,source,source_id,source_url,active,seasons_count,game_size_gb'
+const columns = 'id,category,media_type,media_format,title,title_key,synopsis,poster_url,genres,year,source,source_id,source_url,active,seasons_count,game_size_gb,available_seasons,season_details_checked_at,season_details_note'
 
 /** Recherche globale (Ctrl + K) dans les cinq univers, interrogée côté serveur pour ne pas charger tout le catalogue. */
 export function SearchPalette({ open, onClose, onChoose, demo }: { open: boolean; onClose: () => void; onChoose: (item: CatalogItem) => void; demo: CatalogItem[] }) {

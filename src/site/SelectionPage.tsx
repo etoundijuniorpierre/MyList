@@ -5,12 +5,13 @@ import { Cover, formatPrice } from '../media'
 import { calculateCart, discountProgress } from '../pricing'
 import { buildCartMessage } from '../cartMessage'
 import { categoryMeta, kindLabel, measureLabel, plural, setPageMeta } from '../display'
-import { categories, type PricingSettings } from '../types'
+import { categories, type CartItem, type PricingSettings } from '../types'
+import { seasonSelectionLabel } from '../seasonSelection'
 import { useSite } from './context'
 
 const NAME_KEY = 'mylist-customer-name'
 
-export function SelectionPage({ loading, pricingError = '', onVerifyPricing }: { loading: boolean; pricingError?: string; onVerifyPricing: () => Promise<PricingSettings | null> }) {
+export function SelectionPage({ loading, pricingError = '', onVerifyPricing, onVerifyItems }: { loading: boolean; pricingError?: string; onVerifyPricing: () => Promise<PricingSettings | null>; onVerifyItems: () => Promise<CartItem[]> }) {
   const { selectedItems: items, selection, toggle, clearSelection, prices, gameTiers, gameDiscount, settings, notify } = useSite()
   const [name, setName] = useState(() => { try { return localStorage.getItem(NAME_KEY) ?? '' } catch { return '' } })
   const [confirmClear, setConfirmClear] = useState(false)
@@ -28,9 +29,9 @@ export function SelectionPage({ loading, pricingError = '', onVerifyPricing }: {
   async function confirmedMessage() {
     setChecking(true)
     try {
-      const latest = await onVerifyPricing()
+      const [latest, verifiedItems] = await Promise.all([onVerifyPricing(), onVerifyItems()])
       if (!latest) throw new Error('Les tarifs sont momentanément indisponibles. Réessayez avant d’envoyer le panier.')
-      return { text: buildCartMessage(calculateCart(items, latest.prices, latest.gameTiers, latest.gameDiscount), name, formatPrice), number: latest.settings.whatsapp_number }
+      return { text: buildCartMessage(calculateCart(verifiedItems, latest.prices, latest.gameTiers, latest.gameDiscount), name, formatPrice), number: latest.settings.whatsapp_number }
     } finally { setChecking(false) }
   }
   async function send() {
@@ -73,7 +74,7 @@ export function SelectionPage({ loading, pricingError = '', onVerifyPricing }: {
               <div className="selection-group-head"><h2>{category.label}</h2><span>{plural(entries.length, 'titre')}{sub !== null && entries[0].pricing ? ` · ${formatPrice(sub, entries[0].pricing.currency)}` : ''}</span></div>
               {entries.map(({ item, pricing, standard }) => <div className="selection-row" key={item.id}>
                 <Link to={`${categoryMeta[item.category].route}?titre=${encodeURIComponent(item.id)}`} className="selection-cover" aria-label={`Voir la fiche de ${item.title}`}><Cover item={item} sizes="72px" /></Link>
-                <div className="selection-info"><span className="row-kind">{kindLabel(item)}</span><h3>{item.title}</h3><p>{pricing?.detail ?? measureLabel(item)}</p></div>
+                <div className="selection-info"><span className="row-kind">{kindLabel(item)}</span><h3>{item.title}</h3>{seasonSelectionLabel(item) && <p>{seasonSelectionLabel(item)} · <Link to={`${categoryMeta[item.category].route}?titre=${encodeURIComponent(item.id)}`}>Modifier les saisons</Link></p>}{(item as CartItem).selection_error && <p role="alert">{(item as CartItem).selection_error}</p>}<p>{pricing?.detail ?? measureLabel(item)}</p></div>
                 <div className="row-end">
                   <strong>{pricing ? formatPrice(pricing.amount, pricing.currency) : 'Prix à venir'}</strong>
                   {pricing && standard !== null && standard > pricing.amount && <s>{formatPrice(standard, pricing.currency)}</s>}

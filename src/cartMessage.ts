@@ -1,6 +1,7 @@
 import { kindLabel } from './display'
 import { categories } from './types'
 import type { calculateCart } from './pricing'
+import { seasonSelectionLabel } from './seasonSelection'
 
 export function buildCartMessage(cart: ReturnType<typeof calculateCart>, name: string, format: (amount: number, currency: string) => string): string {
   if (!cart.priced.length || cart.total === null || !Number.isFinite(cart.total) || cart.total <= 0 || !cart.currency) {
@@ -10,7 +11,7 @@ export function buildCartMessage(cart: ReturnType<typeof calculateCart>, name: s
     const entries = cart.priced.filter(entry => entry.item.category === category.key)
     return entries.length ? [
       `*${category.label.toUpperCase()}*`,
-      ...entries.map(({ item, pricing }, index) => `${index + 1}. ${item.title}${item.media_type === 'chinese-drama' || item.media_type === 'korean-drama' || item.media_format === 'film' ? ` [${kindLabel(item)}]` : ''} (${pricing!.detail}) — ${format(pricing!.amount, pricing!.currency)}`),
+      ...entries.map(({ item, pricing }, index) => `${index + 1}. ${item.title}${item.media_type === 'chinese-drama' || item.media_type === 'korean-drama' || item.media_format === 'film' ? ` [${kindLabel(item)}]` : ''}${seasonSelectionLabel(item) ? ` [${seasonSelectionLabel(item)}]` : ''} (${pricing!.detail}) — ${format(pricing!.amount, pricing!.currency)}`),
       '',
     ] : []
   })

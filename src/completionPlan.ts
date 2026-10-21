@@ -38,7 +38,7 @@ export function completionPatch(item: CatalogItem, found: CompletionData, extra:
     if (found.seasons_total) {
       patch.seasons_total = found.seasons_total
       // Un total public ne prouve pas que toutes les saisons sont disponibles à la vente.
-      if (item.category !== 'games' && item.media_format !== 'film' && !item.metadata_preferences?.seasons_manual && (!item.seasons_count || item.metadata_preferences?.seasons_auto)) {
+      if (item.category !== 'games' && item.media_format !== 'film' && !item.available_seasons?.length && !item.metadata_preferences?.seasons_manual && (!item.seasons_count || item.metadata_preferences?.seasons_auto)) {
         patch.seasons_count = found.seasons_total
         patch.metadata_preferences = { ...(patch.metadata_preferences as MetadataPreferences), seasons_auto: true }
       }

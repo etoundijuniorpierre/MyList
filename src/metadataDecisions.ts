@@ -36,7 +36,13 @@ export function needsSeasonLookup(item: CatalogItem, now = Date.now()) {
 
 export function needsCompletion(item: CatalogItem) {
   if (item.metadata_preferences?.rejected) return false
-  return !item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year || needsSeasonLookup(item)
+  return !item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year || needsSeasonLookup(item) || needsSeasonDetails(item)
+}
+
+export function needsSeasonDetails(item: CatalogItem, now = Date.now()) {
+  if (!['series', 'anime'].includes(item.category) || item.media_format === 'film') return false
+  const checked = Date.parse(item.season_details_checked_at ?? '')
+  return !Number.isFinite(checked) || now - checked >= (item.season_details_note ? 86400_000 : 30 * 86400_000)
 }
 
 export function reviewIsPending(item: CatalogItem, dismissed?: boolean) {

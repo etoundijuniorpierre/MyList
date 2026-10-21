@@ -1,6 +1,7 @@
 import type { CatalogItem, ItemInput, MetadataResult } from './types'
 import { normalizeTitle, titleKey } from './types'
 import { cleanTitle, type ScannedItem } from './folderScan'
+import { availableSeasonNumbers, hasSeasonChoices, validSeasonNumbers } from './seasonSelection'
 
 export function unmatchedAnime(title: string): MetadataResult {
   const cleanTitle = title.trim()
@@ -150,6 +151,9 @@ export function scannedItemInput(row: ScannedItem, existing?: CatalogItem): Item
   const mediaType = row.category === 'anime' ? 'anime' : row.category === 'dramas' ? row.media_type : null
   const title = existing?.title ?? row.title.trim()
   const seasonsMissing = row.warning?.includes('Saison non indiquée') ?? false
+  const numbered = hasSeasonChoices(row) && row.season_numbers?.length === row.seasons_count ? validSeasonNumbers(row.season_numbers) : []
+  const available = numbered.length ? validSeasonNumbers([...(existing ? availableSeasonNumbers(existing) : []), ...numbered]) : existing?.available_seasons ?? null
+  const detailsChanged = available?.length && JSON.stringify(available) !== JSON.stringify(existing ? availableSeasonNumbers(existing) : [])
   return {
     category: row.category,
     media_type: mediaType,
@@ -165,9 +169,11 @@ export function scannedItemInput(row: ScannedItem, existing?: CatalogItem): Item
     source_url: existing?.source_url ?? null,
     active: existing?.active ?? true,
     // Un disque ne retire jamais de saisons : « S04 » seul sur le disque d'hiver ne ramène pas une fiche de 5 saisons à 4.
-    seasons_count: row.category === 'games' ? null : seasonsMissing ? existing?.seasons_count ?? row.seasons_count
+    seasons_count: row.category === 'games' ? null : available?.length ? available.length : seasonsMissing ? existing?.seasons_count ?? row.seasons_count
       : Math.max(row.seasons_count ?? 0, existing?.seasons_count ?? 0) || null,
     game_size_gb: row.category === 'games' ? row.game_size_gb ?? existing?.game_size_gb ?? null : null,
+    ...(hasSeasonChoices(row) ? { available_seasons: available } : {}),
+    season_details_checked_at: detailsChanged || (row.seasons_count ?? 0) > (existing?.seasons_count ?? 0) ? null : existing?.season_details_checked_at ?? null,
   }
 }
 
@@ -202,7 +208,8 @@ export function planScanImport(rows: ScannedItem[], items: CatalogItem[]): ScanP
     merged.set(key, {
       row: {
         ...previous.row,
-        seasons_count: Math.max(previous.row.seasons_count ?? 0, normalized.seasons_count ?? 0) || null,
+        seasons_count: Math.max(previous.row.seasons_count ?? 0, normalized.seasons_count ?? 0, validSeasonNumbers([...(previous.row.season_numbers ?? []), ...(normalized.season_numbers ?? [])]).length) || null,
+        season_numbers: validSeasonNumbers([...(previous.row.season_numbers ?? []), ...(normalized.season_numbers ?? [])]),
         game_size_gb: Math.max(previous.row.game_size_gb ?? 0, normalized.game_size_gb ?? 0) || null,
         file_count: previous.row.file_count + normalized.file_count,
         warning: previous.row.warning?.includes('Saison non indiquée') && !normalized.warning?.includes('Saison non indiquée') ? normalized.warning : previous.row.warning,
@@ -216,6 +223,7 @@ export function planScanImport(rows: ScannedItem[], items: CatalogItem[]): ScanP
     const changes: string[] = []
     if (existing) {
       if (input.category !== 'games' && (input.seasons_count ?? 0) !== (existing.seasons_count ?? 0)) changes.push(`Saisons ${existing.seasons_count ?? '?'} → ${input.seasons_count ?? '?'}`)
+      if (input.available_seasons?.length && JSON.stringify(input.available_seasons) !== JSON.stringify(existing.available_seasons ?? availableSeasonNumbers(existing))) changes.push(`Numéros des saisons disponibles : ${input.available_seasons.join(', ')}`)
       if (input.category === 'games' && input.game_size_gb && Math.abs((existing.game_size_gb ?? 0) - input.game_size_gb) > Math.max(0.05, input.game_size_gb * 0.02)) changes.push(`Taille ${existing.game_size_gb ?? '?'} → ${input.game_size_gb} Go`)
     }
     if (sources.length > 1) changes.push(`${sources.length} dossiers fusionnés`)

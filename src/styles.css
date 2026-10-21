@@ -893,6 +893,38 @@ kbd { font-family: var(--body); font-size: 10px; font-weight: 700; color: var(--
 .order-warning { padding: 12px 14px; border-radius: 10px; border: 1px solid #ffc48a50; color: #ffc48a; font-size: 14px; line-height: 1.6; }
 .order-summary .order-warning { color: #ffc48a; }
 .order-summary .order-footnote { font-size: 12px; }
+.season-picker { margin-block: 24px; padding-block: 20px; border-block: 1px solid var(--line); }
+.season-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.season-picker h3 { margin: 0; font-size: 18px; }
+.season-picker-head > span, .season-picker > p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.season-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-block: 12px; }
+.season-status { display: flex; align-items: center; gap: 8px; }
+.season-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); gap: 12px; margin-block: 18px; }
+.season-card { min-width: 0; padding: 8px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); }
+.season-card.is-selected { border-color: var(--accent); }
+.season-card label { position: relative; display: flex; flex-direction: column; gap: 5px; cursor: pointer; }
+.season-card .cover { width: 100%; aspect-ratio: 2/3; border-radius: 7px; }
+.season-card input { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; accent-color: var(--accent); cursor: pointer; }
+.season-card strong { font-size: 13px; }
+.season-card span { font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.season-card small { font-size: 10px; color: var(--dim); }
+.season-card > button { margin-top: 10px; font-size: 11px; min-height: 32px; }
+.season-description { margin-top: 10px; font-size: 12px; line-height: 1.5; }
+.season-description summary { cursor: pointer; min-height: 32px; }
+.season-description p { white-space: pre-line; overflow-wrap: anywhere; color: var(--muted); }
+.season-editor textarea { width: 100%; min-height: 120px; resize: vertical; background: var(--surface); color: var(--text); border: 1px solid var(--line-2); border-radius: 8px; padding: 10px; font: inherit; font-size: 16px; }
+.season-editor { display: grid; gap: 12px; padding: 18px; margin-top: 16px; border: 1px solid var(--line-2); border-radius: 12px; }
+.season-editor label { display: grid; gap: 6px; font-size: 13px; }
+.season-editor input { width: 100%; min-height: 44px; background: var(--surface); color: var(--text); border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 12px; font-size: 16px; }
+.season-reference { display: grid; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--line-2); min-width: 0; }
+.season-reference h4 { margin: 0; }
+.season-reference a { color: var(--accent); font-size: 12px; overflow-wrap: anywhere; }
+.season-reference-preview { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line-2); border-radius: 8px; min-width: 0; }
+.season-reference-preview img { width: 90px; max-height: 135px; object-fit: contain; }
+.season-reference-preview p { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.season-reference-preview small { color: var(--muted); }
+.season-editor .season-reference-confirm { display: flex; align-items: flex-start; gap: 8px; }
+.season-editor .season-reference-confirm input { width: 20px; height: 20px; min-height: 20px; flex: 0 0 20px; accent-color: var(--accent); }
 .order-pricing-fields { display: grid; gap: 24px; padding: 0; margin: 0; min-width: 0; border: 0; }
 .order-pricing-fields:disabled { opacity: .55; }
 .price-form .order-pricing-mode { display: flex; align-items: center; gap: 10px; }
