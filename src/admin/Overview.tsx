@@ -1,4 +1,4 @@
-import { needsCompletion } from '../metadataDecisions'
+import { needsCoreCompletion } from '../metadataDecisions'
 import { useMemo, type CSSProperties } from 'react'
 import { ArrowRight, CircleAlert, FolderSearch, ListPlus, MessageCircle, Plus, Sparkles } from 'lucide-react'
 import { Cover } from '../media'
@@ -18,6 +18,7 @@ interface Props {
 }
 
 export function Overview({ items, prices, gameTiers, settings, posterJobRunning, onGo, onComplete }: Props) {
+  const activeItems = useMemo(() => items.filter((item) => item.active), [items])
   const stats = useMemo(() => categories.map((entry) => {
     const list = items.filter((item) => item.category === entry.key)
     const pct = (test: (item: CatalogItem) => boolean) => list.length ? Math.round(list.filter(test).length / list.length * 100) : 0
@@ -25,11 +26,11 @@ export function Overview({ items, prices, gameTiers, settings, posterJobRunning,
   }), [items])
   const issues = useMemo(() => {
     const counts: Record<HealthIssue, number> = { poster: 0, synopsis: 0, genres: 0, year: 0, measure: 0, title: 0, seasons: 0 }
-    for (const item of items) for (const issue of itemIssues(item)) counts[issue]++
+    for (const item of activeItems) for (const issue of itemIssues(item)) counts[issue]++
     return counts
-  }, [items])
+  }, [activeItems])
   const recent = useMemo(() => [...items].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')).slice(0, 8), [items])
-  const incomplete = items.filter(needsCompletion).length
+  const incomplete = items.filter((item) => item.active && needsCoreCompletion(item)).length
   const unpriced = (['series', 'anime', 'novelas', 'dramas'] as const).filter((category) => items.some((item) => item.category === category) && prices.find((rule) => rule.category === category)?.standard_price == null)
   const checklist = [
     { ok: Boolean(settings.whatsapp_number), text: settings.whatsapp_number ? 'Numéro WhatsApp configuré' : 'Aucun numéro WhatsApp : les visiteurs ne peuvent pas envoyer leur panier', tab: 'settings' as AdminTab },
@@ -40,8 +41,8 @@ export function Overview({ items, prices, gameTiers, settings, posterJobRunning,
   return <div className="admin-overview">
     <div className="kpi-grid">
       <div className="kpi"><span>Titres au catalogue</span><strong>{items.length.toLocaleString('fr-FR')}</strong><small>{plural(items.filter((item) => !item.active).length, 'masqué')}</small></div>
-      <div className="kpi"><span>Avec affiche</span><strong>{items.length ? Math.round((1 - issues.poster / items.length) * 100) : 0} %</strong><small>{plural(issues.poster, 'manquante')}</small></div>
-      <div className="kpi"><span>Avec description</span><strong>{items.length ? Math.round((1 - issues.synopsis / items.length) * 100) : 0} %</strong><small>{plural(issues.synopsis, 'manquante')}</small></div>
+      <div className="kpi"><span>Avec affiche</span><strong>{activeItems.length ? Math.round((1 - issues.poster / activeItems.length) * 100) : 0} %</strong><small>{plural(issues.poster, 'manquante')}</small></div>
+      <div className="kpi"><span>Avec description</span><strong>{activeItems.length ? Math.round((1 - issues.synopsis / activeItems.length) * 100) : 0} %</strong><small>{plural(issues.synopsis, 'manquante')}</small></div>
       <div className="kpi"><span>Saisons au total</span><strong>{items.reduce((sum, item) => sum + (item.seasons_count ?? 0), 0).toLocaleString('fr-FR')}</strong><small>{Math.round(items.reduce((sum, item) => sum + (Number(item.game_size_gb) || 0), 0)).toLocaleString('fr-FR')} Go de jeux</small></div>
     </div>
 

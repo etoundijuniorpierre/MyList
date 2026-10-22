@@ -111,7 +111,7 @@ test('le scan conserve S02 et S04 et fusionne deux dossiers de saisons sans les 
   assert.deepEqual(updated.available_seasons, [2, 4])
   assert.equal(updated.seasons_count, 2)
 })
-test('la complétion réclame les saisons détaillées et respecte la durée de conservation des décisions', () => {
+test('la complétion réclame les saisons détaillées et conserve un contrôle déjà effectué', () => {
   assert.equal(needsSeasonDetails(item()), true)
   assert.equal(needsSeasonDetails(item({ season_details_checked_at: new Date().toISOString() })), false)
   assert.equal(needsSeasonDetails(item({ category: 'anime', media_format: 'film' })), false)

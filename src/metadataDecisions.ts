@@ -44,15 +44,26 @@ export function hasVerifiedSeasonTotal(item: Pick<CatalogItem, 'seasons_total' |
   return Boolean(reference?.locked && Number.isInteger(reference.count) && reference.count >= 1 && reference.count <= 999 && reference.count === item.seasons_total)
 }
 
-export function needsCompletion(item: CatalogItem) {
+/** Champs qui rendent réellement une fiche incomplète dans le catalogue. */
+export function needsCoreCompletion(item: CatalogItem) {
   if (item.metadata_preferences?.rejected) return false
-  return !item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year || needsSeasonLookup(item) || needsSeasonDetails(item)
+  return !item.poster_url || !item.synopsis?.trim() || !item.genres.length || !item.year || needsSeasonLookup(item)
 }
 
-export function needsSeasonDetails(item: CatalogItem, now = Date.now()) {
+/** Travail automatique restant, y compris le premier remplissage des fiches de saisons. */
+export function needsCompletion(item: CatalogItem) {
+  if (item.metadata_preferences?.rejected) return false
+  return needsCoreCompletion(item) || needsSeasonDetails(item)
+}
+
+export function needsSeasonDetails(item: CatalogItem) {
   if (!['series', 'anime'].includes(item.category) || item.media_format === 'film' || isEpisodeCollection(item)) return false
   const checked = Date.parse(item.season_details_checked_at ?? '')
-  return !Number.isFinite(checked) || now - checked >= (item.season_details_note ? 86400_000 : 30 * 86400_000)
+  // Une recherche réussie reste acquise. Le compteur ne doit pas rouvrir toutes
+  // les fiches au bout de 30 jours. Les imports et les modifications du nombre
+  // de saisons remettent explicitement cette date à null lorsqu'un nouveau
+  // contrôle est réellement nécessaire.
+  return !Number.isFinite(checked)
 }
 
 export function reviewIsPending(item: CatalogItem, dismissed?: boolean) {

@@ -27,7 +27,7 @@ import { itemWriteLocks, saveCatalogItem } from './admin/saveCatalogItem'
 import type { useItemSaves } from './admin/useItemSaves'
 import type { ItemSaveJob } from './admin/itemSaveQueue'
 import { validSeasonNumbers, hasSeasonChoices } from './seasonSelection'
-import { needsCompletion } from './metadataDecisions'
+import { needsCoreCompletion } from './metadataDecisions'
 import { categories, type CatalogItem, type Category, type GameCountDiscount, type GamePriceTier, type ItemInput, type MetadataResult, type PriceRule, type SiteSettings, titleKey } from './types'
 
 export default function AdminPage({ catalogLoading, user, isAdmin, authReady, items, prices, gameTiers, gameDiscount, settings, onSettingsChanged, saves, getItems, onCommit, onChanged, onMerged, posterJobRunning, onRunPosterJob, idleMinutes, onIdleMinutes, onSignOut }: { catalogLoading: boolean; user: User | null; isAdmin: boolean; authReady: boolean; items: CatalogItem[]; prices: PriceRule[]; gameTiers: GamePriceTier[]; gameDiscount: GameCountDiscount; settings: SiteSettings; onSettingsChanged: (value: SiteSettings) => void; saves: ReturnType<typeof useItemSaves>; getItems: () => CatalogItem[]; onCommit: (rows: CatalogItem[], removedIds?: string[]) => void; onChanged: () => Promise<void>; onMerged: (removedId: string, keptId: string) => void; posterJobRunning: boolean; onRunPosterJob: (kind: PosterJobKind, filter: Category | 'all', ids?: string[]) => Promise<void>; idleMinutes: number; onIdleMinutes: (minutes: number) => void; onSignOut: (reason: 'inactivite' | 'deconnexion', scope?: 'local' | 'global') => Promise<void> }) {
@@ -299,7 +299,7 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
       await onChanged()
       setScanned([])
       // Les fiches nouvelles ou incomplètes passent ensuite par toutes les sources de métadonnées.
-      const needsData = new Set(writes.filter((entry) => !entry.existing || needsCompletion({ ...entry.existing, ...entry.input })).map((entry) => entry.existing?.id))
+      const needsData = new Set(writes.filter((entry) => !entry.existing || needsCoreCompletion({ ...entry.existing, ...entry.input })).map((entry) => entry.existing?.id))
       completeAfterImport(savedIds.filter((id) => needsData.has(id) || !items.some((item) => item.id === id)))
       const retired = [...retireIds].filter((id) => sagaRetire.some((item) => item.id === id))
       if (retired.length) {
@@ -392,7 +392,7 @@ export default function AdminPage({ catalogLoading, user, isAdmin, authReady, it
     <ItemSaveStatus jobs={saves.jobs} onRetry={saves.queue.retry} onResume={resumeFailedSave} onDismiss={saves.queue.dismiss} />
     <div className="admin-head"><div><span className="eyebrow">Votre espace privé</span><h1>{nav.flatMap((section) => section.tabs).find(([key]) => key === tab)?.[1]}</h1></div></div>
     {message && <p className="admin-message" role="alert">{message}<button type="button" aria-label="Fermer le message" onClick={() => setMessage('')}><X size={15} /></button></p>}
-    {tab === 'overview' && <Overview items={items} prices={prices} gameTiers={gameTiers} settings={settings} posterJobRunning={posterJobRunning} onGo={go} onComplete={() => void onRunPosterJob('complete', 'all')} />}
+    {tab === 'overview' && <Overview items={items} prices={prices} gameTiers={gameTiers} settings={settings} posterJobRunning={posterJobRunning} onGo={go} onComplete={() => void onRunPosterJob('complete', 'all', items.filter((item) => item.active && needsCoreCompletion(item)).map((item) => item.id))} />}
     <div hidden={tab !== 'catalog'}><CatalogTab items={items} busy={busy} pendingIds={pendingIds} posterJobRunning={posterJobRunning} initialIssue={issueFilter} confirm={confirm} onEdit={startEdit} onChanged={onChanged} onMessage={report} onRunPosterJob={onRunPosterJob} /></div>
     {tab === 'review' && <ReviewTab items={items} posterJobRunning={posterJobRunning} onChanged={onChanged} onUpdated={item => onCommit([item])} onMessage={report} onEdit={startEdit} onRunPosterJob={onRunPosterJob} />}
     {tab === 'health' && <HealthTab items={items} posterJobRunning={posterJobRunning} confirm={confirm} onChanged={onChanged} onUpdated={item => onCommit([item])} onMessage={report} onEdit={startEdit} onShowIssue={(issue) => go('catalog', issue)} onRunPosterJob={onRunPosterJob} />}

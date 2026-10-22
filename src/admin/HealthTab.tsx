@@ -9,7 +9,7 @@ import type { PosterJobKind } from '../App'
 import type { Confirm } from './useConfirm'
 import { catalogIdentity } from '../catalogImport'
 import { formatWorks, isNoiseEntry, looksLikeSaga, parseWorks, sagaPreset } from './sagaPresets'
-import { needsCompletion, requireDecisionStorage } from '../metadataDecisions'
+import { needsCoreCompletion, needsSeasonDetails, requireDecisionStorage } from '../metadataDecisions'
 
 const SAGA_IGNORED_KEY = 'mylist-saga-ignored'
 function readIgnored() { try { return new Set<string>(JSON.parse(localStorage.getItem(SAGA_IGNORED_KEY) ?? '[]')) } catch { return new Set<string>() } }
@@ -31,14 +31,15 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onUpdat
   const duplicates = useMemo(() => probableDuplicates(items), [items])
   const counts = useMemo(() => {
     const result: Record<HealthIssue, number> = { poster: 0, synopsis: 0, genres: 0, year: 0, measure: 0, title: 0, seasons: 0 }
-    for (const item of items) for (const issue of itemIssues(item)) result[issue]++
+    for (const item of items) if (item.active) for (const issue of itemIssues(item)) result[issue]++
     return result
   }, [items])
   const [edits, setEdits] = useState<Record<string, string>>({})
   const [working, setWorking] = useState(false)
   const [shown, setShown] = useState(40)
   const pending = suggestions
-  const incomplete = items.filter(needsCompletion)
+  const incomplete = items.filter((item) => item.active && needsCoreCompletion(item))
+  const seasonsToDetail = items.filter((item) => item.active && !item.metadata_preferences?.rejected && needsSeasonDetails(item))
   const acceptedTitles = items.filter(item => item.metadata_preferences?.title === item.title)
   const translatable = items.filter((item) => Boolean(item.synopsis?.trim()))
   const [ignoredSagas, setIgnoredSagas] = useState(readIgnored)
@@ -154,10 +155,11 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onUpdat
 
   return <div className="admin-health">
     <section className="admin-card">
-      <div className="admin-panel-head"><div><h2>Fiches incomplètes</h2><p>Cliquez sur un problème pour voir les titres concernés.</p></div>
+      <div className="admin-panel-head"><div><h2>Fiches incomplètes</h2><p>Ce compteur concerne uniquement les champs visibles manquants. Les détails des saisons sont traités séparément.</p></div>
         <div className="admin-row-actions"><button type="button" disabled={!translatable.length || posterJobRunning} onClick={() => void onRunPosterJob('translate', 'all', translatable.map((item) => item.id))}><Languages size={16} /> Traduire {plural(translatable.length, 'description')}</button><button type="button" className="button-primary" disabled={!incomplete.length || posterJobRunning} onClick={() => void onRunPosterJob('complete', 'all', incomplete.map((item) => item.id))}><Sparkles size={16} /> Compléter {plural(incomplete.length, 'fiche')}</button></div></div>
       <div className="issue-chips">{(Object.entries(counts) as [HealthIssue, number][]).map(([issue, count]) => <button type="button" key={issue} className={`issue-chip ${count ? '' : 'is-ok'}`} disabled={!count} onClick={() => onShowIssue(issue)}><span>{issueLabels[issue]}</span><strong>{count.toLocaleString('fr-FR')}</strong></button>)}</div>
       <p className="scan-help">La complétion recherche aussi le total des saisons. Elle remplit une quantité absente ; les quantités issues du disque ou validées manuellement restent conservées. Les tailles de jeux proviennent toujours de vos fichiers.</p>
+      {seasonsToDetail.length > 0 && <div className="admin-row-actions"><button type="button" disabled={posterJobRunning} onClick={() => void onRunPosterJob('complete', 'all', seasonsToDetail.map((item) => item.id))}><Layers size={16} /> Ajouter les détails de {plural(seasonsToDetail.length, 'fiche saisonnière', 'fiches saisonnières')}</button><p className="admin-help">Première recherche seulement, ou nouvelle recherche après une modification du nombre de saisons. Une fiche déjà contrôlée ne revient plus automatiquement tous les 30 jours.</p></div>}
     </section>
 
     {sagas.length > 0 && <section className="admin-card">

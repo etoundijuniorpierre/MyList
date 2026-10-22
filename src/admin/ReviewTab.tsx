@@ -9,7 +9,7 @@ import { dismissReview, readReviews, removeReview, REVIEW_EVENT, REVIEW_KEY, sav
 import { titleKey, type CatalogItem, type Category } from '../types'
 import type { PosterJobKind } from '../App'
 import { supabase } from '../supabase'
-import { acceptedPreferences, needsCompletion, requireDecisionStorage, retainedCandidate, reviewIsPending } from '../metadataDecisions'
+import { acceptedPreferences, needsCoreCompletion, requireDecisionStorage, retainedCandidate, reviewIsPending } from '../metadataDecisions'
 
 const RENAME_KEY = 'mylist-review-rename'
 const sourceNames: Record<string, string> = { anilist: 'AniList', 'jikan-anime': 'MyAnimeList', kitsu: 'Kitsu', tvmaze: 'TVMaze', tvdb: 'TheTVDB', igdb: 'IGDB', rawg: 'RAWG', steam: 'Steam', wikipedia: 'Wikipédia' }
@@ -48,7 +48,7 @@ export function ReviewTab({ items, posterJobRunning, onUpdated, onMessage, onEdi
     .filter((entry) => entry.candidates.length && byId.has(entry.itemId) && reviewIsPending(byId.get(entry.itemId)!, entry.dismissed))
     .sort((a, b) => a.title.localeCompare(b.title, 'fr', { sensitivity: 'base' })), [entries, byId])
   const dismissed = items.filter(item => item.metadata_preferences?.rejected || entries[item.id]?.dismissed)
-  const incomplete = items.filter((item) => item.active && needsCompletion(item) && (!entries[item.id] || retainedCandidate(item)))
+  const incomplete = items.filter((item) => item.active && needsCoreCompletion(item) && (!entries[item.id] || retainedCandidate(item)))
   const accepted = items.filter(item => item.metadata_preferences?.match)
 
   useEffect(() => { try { localStorage.setItem(RENAME_KEY, rename ? '1' : '0') } catch { /* Préférence locale facultative. */ } }, [rename])

@@ -8,7 +8,7 @@ import { issueLabels, itemIssues, type HealthIssue } from '../titleHealth'
 import { categories, normalizeTitle, type CatalogItem, type Category } from '../types'
 import type { PosterJobKind } from '../App'
 import type { Confirm } from './useConfirm'
-import { needsCompletion } from '../metadataDecisions'
+import { needsCoreCompletion } from '../metadataDecisions'
 
 const PAGE = 50
 type Status = 'all' | 'active' | 'hidden'
@@ -114,7 +114,7 @@ export function CatalogTab({ items, busy, pendingIds, posterJobRunning, initialI
       <label className="select-field"><span className="visually-hidden">Tri</span><select value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="recent">Plus récents</option><option value="old">Plus anciens</option><option value="az">A → Z</option></select></label>
     </div>
     <div className="job-actions">
-      <button type="button" className="button-ghost" disabled={disabled || posterJobRunning || !filtered.some(needsCompletion)} onClick={() => void onRunPosterJob('complete', 'all', filtered.filter(needsCompletion).map((item) => item.id))}><Sparkles size={15} /> Compléter les fiches affichées</button>
+      <button type="button" className="button-ghost" disabled={disabled || posterJobRunning || !filtered.some(needsCoreCompletion)} onClick={() => void onRunPosterJob('complete', 'all', filtered.filter(needsCoreCompletion).map((item) => item.id))}><Sparkles size={15} /> Compléter les fiches affichées</button>
       <button type="button" className="button-ghost" disabled={disabled || posterJobRunning || !items.some((item) => item.poster_url && !isCachedPosterUrl(item.poster_url))} onClick={() => void onRunPosterJob('cache', category)}>Copier les affiches sur Supabase</button>
       <button type="button" className="button-ghost" title="Vérifie les proportions et ne remplace que les affiches paysage ou illisibles." disabled={disabled || posterJobRunning || !items.some((item) => item.category === 'games' && item.poster_url)} onClick={() => void onRunPosterJob('repair-games', 'games')}>Corriger les jaquettes paysage</button>
     </div>

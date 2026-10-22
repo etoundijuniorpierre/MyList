@@ -17,7 +17,7 @@ require.extensions['.ts'] = (module, filename) => {
   const source = fs.readFileSync(filename, 'utf8').replace(/import\.meta\.env/g, '({})')
   module._compile(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, filename)
 }
-const { acceptedPreferences, needsCompletion, needsSeasonLookup, reviewIsPending, requireDecisionStorage, retainedCandidate } = require('../src/metadataDecisions.ts')
+const { acceptedPreferences, needsCompletion, needsCoreCompletion, needsSeasonDetails, needsSeasonLookup, reviewIsPending, requireDecisionStorage, retainedCandidate } = require('../src/metadataDecisions.ts')
 const { suggestTitle } = require('../src/titleHealth.ts')
 const { completionPatch } = require('../src/completionPlan.ts')
 const { completeMetadata, completionFrom } = require('../src/metadata.ts')
@@ -113,11 +113,18 @@ test('le total manquant déclenche une recherche même si affiche, description e
   assert.equal(needsCompletion(row()), true)
   const checked = row({ seasons_total: 5, seasons_checked_at: new Date().toISOString() })
   assert.equal(needsCompletion(checked), true, 'les saisons détaillées doivent aussi être complétées')
+  assert.equal(needsCoreCompletion(checked), false, 'une fiche principale complète ne doit pas gonfler le compteur administrateur')
   checked.season_details_checked_at = new Date().toISOString()
   assert.equal(needsCompletion(checked), false)
   assert.equal(needsSeasonLookup(row({ category: 'games' })), false)
   assert.equal(needsSeasonLookup(row({ media_format: 'film' })), false)
   assert.equal(needsSeasonLookup(row({ seasons_checked_at: new Date().toISOString() })), false)
+})
+
+test('les détails de saisons déjà contrôlés ne réapparaissent pas après trente jours', () => {
+  const old = row({ season_details_checked_at: '2026-01-01T00:00:00Z', season_details_note: 'Certaines images sont absentes.' })
+  assert.equal(needsSeasonDetails(old), false)
+  assert.equal(needsSeasonDetails(row()), true)
 })
 
 test('un total sourcé devient la quantité exacte des animés, y compris après un ancien scan ou réglage partiel', () => {
