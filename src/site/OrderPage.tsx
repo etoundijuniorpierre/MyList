@@ -8,7 +8,7 @@ import { supabase } from '../supabase'
 import { catalogFirstSearch, catalogSearchPattern, programOrderMessage, programQuote, type OrderCandidate } from '../programOrder'
 import { useSite } from './context'
 
-const columns = 'id,category,media_type,media_format,title,title_key,poster_url,genres,year,source,source_id,source_url,active,seasons_count,game_size_gb,available_seasons,season_details_checked_at,season_details_note'
+const columns = 'id,category,media_type,media_format,title,title_key,poster_url,genres,year,source,source_id,source_url,active,seasons_count,seasons_total,game_size_gb,available_seasons,season_details_checked_at,season_details_note'
 type ExternalProgram = { id: string; title: string; source: string; source_url: string; poster_url: string | null; year: number | null; format: 'series' | 'film' | null; media_type?: CatalogItem['media_type']; aliases?: string[] }
 
 export default function OrderPage({ demo, onVerifyPricing }: { demo: CatalogItem[]; onVerifyPricing: () => Promise<PricingSettings | null> }) {

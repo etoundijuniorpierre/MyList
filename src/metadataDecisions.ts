@@ -2,6 +2,7 @@ import type { CatalogItem } from './types'
 import type { Candidate } from './metadataMatch'
 
 export interface MetadataPreferences {
+  seasons_reference?: { count: number; locked: boolean; scheme: string; note: string; source_url: string; checked_at: string; episodes?: number }
   title?: string
   match?: Candidate
   rejected?: boolean
@@ -29,9 +30,15 @@ export function retainedCandidate(item: CatalogItem): Candidate | null {
 
 export function needsSeasonLookup(item: CatalogItem, now = Date.now()) {
   if (item.category === 'games' || item.media_format === 'film') return false
+  if (hasVerifiedSeasonTotal(item)) return false
   const checked = Date.parse(item.seasons_checked_at ?? '')
   const age = item.seasons_total ? 30 * 86400_000 : 86400_000
   return !Number.isFinite(checked) || now - checked >= age
+}
+
+export function hasVerifiedSeasonTotal(item: Pick<CatalogItem, 'seasons_total' | 'metadata_preferences'>) {
+  const reference = item.metadata_preferences?.seasons_reference
+  return Boolean(reference?.locked && Number.isInteger(reference.count) && reference.count >= 1 && reference.count <= 999 && reference.count === item.seasons_total)
 }
 
 export function needsCompletion(item: CatalogItem) {

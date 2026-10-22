@@ -8,12 +8,22 @@ const { calculateCart } = require('../src/pricing.ts')
 const { buildCartMessage } = require('../src/cartMessage.ts')
 const { scannedItemInput, planScanImport } = require('../src/catalogImport.ts')
 const { needsSeasonDetails } = require('../src/metadataDecisions.ts')
+const { measureLabel } = require('../src/display.ts')
 const item = (extra = {}) => ({ id: 'a', title: 'Une série', category: 'series', media_type: null, media_format: null, title_key: 'series:none:une serie', active: true, seasons_count: 4,
   game_size_gb: null, genres: [], source: 'manual', source_id: null, source_url: null, synopsis: null, poster_url: null, year: null, ...extra })
 const rules = [{ category: 'series', standard_price: 500, threshold_seasons: 3, threshold_price: 400, currency: 'XAF' }, { category: 'anime', standard_price: 300, threshold_seasons: 3, threshold_price: 250, currency: 'XAF' }, { category: 'anime-film', standard_price: 800, threshold_seasons: null, threshold_price: null, currency: 'XAF' }]
 const discount = { min_games: null, price_per_game: null, currency: null }
 const empty = () => ({ ids: [], seasons: {} })
 const calculate = entries => calculateCart(entries, rules, [], discount)
+
+test('le catalogue distingue la disponibilité du total sans changer les quantités facturées', () => {
+  const parent = item({ seasons_count: 1, seasons_total: 4 })
+  assert.equal(measureLabel(parent), '1 disponible / 4 saisons')
+  assert.equal(parent.seasons_count, 1)
+  assert.equal(cartItems([parent], { ids: ['a'], seasons: {} })[0].seasons_count, 1)
+  assert.equal(measureLabel(item({ seasons_count: 4, seasons_total: 2 })), '4 disponibles · total à vérifier')
+  assert.equal(measureLabel(item({ seasons_count: null, seasons_total: 4 })), '4 saisons au total · disponibilité à confirmer')
+})
 
 test('une fusion de fiches conserve les saisons choisies et ne transforme pas un choix partiel en intégrale', () => {
   const cart = { ids: ['a', 'b'], seasons: { a: [2], b: [4] } }

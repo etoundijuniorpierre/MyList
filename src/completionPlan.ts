@@ -1,5 +1,6 @@
 import type { CatalogItem } from './types'
 import type { MetadataPreferences } from './metadataDecisions'
+import { hasVerifiedSeasonTotal } from './metadataDecisions'
 import type { Candidate } from './metadataMatch'
 
 export interface CompletionData {
@@ -32,7 +33,7 @@ export function completionPatch(item: CatalogItem, found: CompletionData, extra:
   if (found.source && !item.metadata_preferences?.match) {
     patch.source = found.source; patch.source_id = found.source_id ?? null; patch.source_url = found.source_url ?? null
   }
-  if ('metadata_preferences' in item && found.seasons_checked_at) {
+  if ('metadata_preferences' in item && found.seasons_checked_at && !hasVerifiedSeasonTotal(item)) {
     patch.seasons_checked_at = found.seasons_checked_at
     patch.metadata_preferences = { ...item.metadata_preferences, ...(patch.metadata_preferences as MetadataPreferences | undefined), seasons_note: found.seasons_note, seasons_source_url: found.seasons_source_url }
     if (found.seasons_total) {

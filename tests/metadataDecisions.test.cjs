@@ -131,6 +131,18 @@ test('un total sourcé remplit une quantité absente mais conserve les saisons v
   assert.equal(completionPatch(row({ seasons_count: 5, metadata_preferences: { seasons_auto: true } }), found).seasons_count, 20)
 })
 
+test('un découpage de saisons vérifié manuellement reste prioritaire sans modifier le stock ou le tarif', () => {
+  const reference = { count: 4, locked: true, scheme: 'distribution', note: '170 épisodes en 4 saisons', source_url: 'https://example.com/seasons', checked_at: '2026-10-22T00:00:00Z' }
+  const item = row({ title: 'Black Clover', seasons_total: 4, seasons_count: 1, metadata_preferences: { seasons_reference: reference, seasons_note: reference.note } })
+  assert.equal(needsSeasonLookup(item), false)
+  const patch = completionPatch(item, { seasons_total: 1, seasons_checked_at: new Date().toISOString(), seasons_note: 'Un autre découpage', genres: ['Action'], sources: ['tvmaze'] })
+  assert.equal(patch.seasons_total, undefined)
+  assert.equal(patch.seasons_count, undefined)
+  assert.equal(patch.seasons_checked_at, undefined)
+  assert.equal(patch.metadata_preferences, undefined)
+  assert.equal(needsSeasonLookup({ ...item, seasons_total: 5 }), true, 'une modification explicite du total invalide l’ancienne référence')
+})
+
 test('un total inconnu ne devient jamais une saison par défaut', () => {
   const patch = completionPatch(row({ seasons_count: null }), { seasons_total: null, seasons_checked_at: new Date().toISOString(), sources: [] })
   assert.equal(patch.seasons_count, undefined)

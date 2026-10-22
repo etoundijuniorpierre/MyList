@@ -30,9 +30,14 @@ export function kindLabel(item: Pick<CatalogItem, 'category' | 'media_type' | 'm
   return categoryLabel(item.category).replace(/s$/, '')
 }
 
-export function measureLabel(item: Pick<CatalogItem, 'category' | 'media_format' | 'seasons_count' | 'game_size_gb'>) {
+export function measureLabel(item: Pick<CatalogItem, 'category' | 'media_format' | 'seasons_count' | 'seasons_total' | 'game_size_gb'>) {
   if (item.category === 'games') return item.game_size_gb ? `${Number(item.game_size_gb).toLocaleString('fr-FR')} Go` : 'Taille à venir'
   if (item.media_format === 'film') return 'Film'
+  if (item.seasons_count && item.seasons_total && item.seasons_count > item.seasons_total) return `${item.seasons_count} disponibles · total à vérifier`
+  if (item.seasons_total && item.seasons_total !== item.seasons_count) {
+    if (!item.seasons_count) return `${item.seasons_total} saison${item.seasons_total > 1 ? 's' : ''} au total · disponibilité à confirmer`
+    return `${item.seasons_count} disponible${item.seasons_count > 1 ? 's' : ''} / ${item.seasons_total} saison${item.seasons_total > 1 ? 's' : ''}`
+  }
   if (!item.seasons_count) return 'Saisons à venir'
   return `${item.seasons_count} saison${item.seasons_count > 1 ? 's' : ''}`
 }
