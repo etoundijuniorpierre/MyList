@@ -37,7 +37,7 @@ export function measureLabel(item: Pick<CatalogItem, 'category' | 'media_format'
   if (item.media_format === 'film') return 'Film'
   if (isEpisodeCollection(item)) return 'Collection complète'
   if (usesCommercialSeasons(item)) return `${item.seasons_total} saison${item.seasons_total! > 1 ? 's' : ''}`
-  if (item.category === 'anime' && item.metadata_preferences?.seasons_quantity_mode === 'commercial-total' && item.seasons_count! > item.seasons_total!) return `${item.seasons_count} saisons`
+  if (item.category === 'anime' && item.seasons_count! > item.seasons_total!) return `${item.seasons_count} saisons`
   if (item.seasons_count && item.seasons_total && item.seasons_count > item.seasons_total) return `${item.seasons_total} saison${item.seasons_total > 1 ? 's' : ''} référencée${item.seasons_total > 1 ? 's' : ''} · disponibilité à vérifier`
   if (item.seasons_total && item.seasons_total !== item.seasons_count) {
     if (!item.seasons_count) return `${item.seasons_total} saison${item.seasons_total > 1 ? 's' : ''} au total · disponibilité à confirmer`

@@ -2,7 +2,7 @@ import type { CatalogItem } from './types'
 import type { MetadataPreferences } from './metadataDecisions'
 import { hasVerifiedSeasonTotal } from './metadataDecisions'
 import type { Candidate } from './metadataMatch'
-import { isEpisodeCollection } from './contentFormat'
+import { isEpisodeCollection, usesCommercialSeasons } from './contentFormat'
 
 export interface CompletionData {
   poster_url?: string
@@ -39,7 +39,7 @@ export function completionPatch(item: CatalogItem, found: CompletionData, extra:
     patch.metadata_preferences = { ...item.metadata_preferences, ...(patch.metadata_preferences as MetadataPreferences | undefined), seasons_note: found.seasons_note, seasons_source_url: found.seasons_source_url }
     if (Number.isInteger(found.seasons_total) && found.seasons_total! >= 1 && found.seasons_total! <= 999) {
       patch.seasons_total = found.seasons_total
-      if (item.category === 'anime' && item.media_format !== 'film' && !isEpisodeCollection(item) && item.metadata_preferences?.seasons_quantity_mode === 'commercial-total') {
+      if (usesCommercialSeasons({ ...item, seasons_total: found.seasons_total })) {
         patch.seasons_count = found.seasons_total
         patch.available_seasons = Array.from({ length: found.seasons_total! }, (_, i) => i + 1)
         patch.metadata_preferences = { ...(patch.metadata_preferences as MetadataPreferences), seasons_auto: true }

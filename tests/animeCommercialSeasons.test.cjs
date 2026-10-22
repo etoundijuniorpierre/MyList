@@ -25,6 +25,13 @@ test('le total commercial animé est affiché et sélectionnable, avec un prix q
   assert.equal(seasonSelectionLabel(selected[0]), 'Saisons 2, 5')
 })
 
+test('un animé utilise son total exact même si une vue publique ne reçoit pas l’ancien indicateur interne', () => {
+  const parent = item({ seasons_count: 1, available_seasons: [1], metadata_preferences: {} })
+  assert.equal(measureLabel(parent), '5 saisons')
+  assert.deepEqual(availableSeasonNumbers(parent), [1, 2, 3, 4, 5])
+  assert.equal(calculate(cartItems([parent], { ids: ['anime'], seasons: {} })).total, 2000)
+})
+
 test('une nouvelle recherche ou un import ne ramène pas une saga validée à un dossier de saison', () => {
   const parent = item()
   const imported = scannedItemInput({ title: parent.title, category: 'anime', media_type: 'anime', media_format: 'series', seasons_count: 1, season_numbers: [1], game_size_gb: null }, parent)

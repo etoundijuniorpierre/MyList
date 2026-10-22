@@ -8,7 +8,6 @@ export function isEpisodeCollection(item: SeasonalItem) {
 
 export function usesCommercialSeasons(item: SeasonalItem) {
   return item.category === 'anime' && item.media_format !== 'film' && !isEpisodeCollection(item)
-    && item.metadata_preferences?.seasons_quantity_mode === 'commercial-total'
     && Number.isInteger(item.seasons_total) && item.seasons_total! >= 1 && item.seasons_total! <= 999
     && !(item.seasons_count! > item.seasons_total!)
 }

@@ -3,7 +3,7 @@ import { supabase } from './supabase'
 import { categories, type CatalogItem } from './types'
 import { currentReleaseYear, demoHomeShelves, HOME_RELEASE_LIMIT, makeHomeShelf, type HomeShelf } from './homeData'
 
-const columns = 'id,category,media_type,media_format,title,title_key,synopsis,poster_url,genres,year,source,source_id,source_url,active,seasons_count,game_size_gb,created_at'
+const columns = 'id,category,media_type,media_format,title,title_key,synopsis,poster_url,genres,year,source,source_id,source_url,active,seasons_count,seasons_total,game_size_gb,created_at,metadata_preferences'
 let cache: { year: number; expiresAt: number; shelves: HomeShelf[] } | null = null
 
 // Les nouveautés utilisent l'année de sortie. Les affiches décoratives restent séparées.

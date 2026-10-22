@@ -120,14 +120,14 @@ test('le total manquant déclenche une recherche même si affiche, description e
   assert.equal(needsSeasonLookup(row({ seasons_checked_at: new Date().toISOString() })), false)
 })
 
-test('un total sourcé remplit une quantité absente mais conserve les saisons validées et celles du disque', () => {
+test('un total sourcé devient la quantité exacte des animés, y compris après un ancien scan ou réglage partiel', () => {
   const found = { seasons_total: 20, seasons_checked_at: new Date().toISOString(), sources: ['tvmaze'] }
   const empty = completionPatch(row({ seasons_count: null }), found)
   assert.equal(empty.seasons_count, 20)
   assert.equal(empty.seasons_total, 20)
   assert.equal(empty.metadata_preferences.seasons_auto, true)
-  assert.equal(completionPatch(row({ seasons_count: 5, source: 'scan' }), found).seasons_count, undefined)
-  assert.equal(completionPatch(row({ seasons_count: 5, metadata_preferences: { seasons_manual: 5 } }), found).seasons_count, undefined)
+  assert.equal(completionPatch(row({ seasons_count: 5, source: 'scan' }), found).seasons_count, 20)
+  assert.equal(completionPatch(row({ seasons_count: 5, metadata_preferences: { seasons_manual: 5 } }), found).seasons_count, 20)
   assert.equal(completionPatch(row({ seasons_count: 5, metadata_preferences: { seasons_auto: true } }), found).seasons_count, 20)
 })
 
