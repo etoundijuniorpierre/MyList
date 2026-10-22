@@ -53,7 +53,17 @@ export async function saveCatalogItem(client: SupabaseClient, input: ItemInput, 
   }
   if (manual) {
     payload.metadata_preferences = { ...edited?.metadata_preferences, ...existing?.metadata_preferences, title: payload.title }
-    if (clean.seasons_count) { payload.metadata_preferences.seasons_manual = clean.seasons_count; payload.metadata_preferences.seasons_auto = false }
+    if (input.metadata_preferences && Object.hasOwn(input.metadata_preferences, 'content_kind')) {
+      if (clean.category === 'anime' && clean.media_format !== 'film' && input.metadata_preferences.content_kind === 'episode-collection') {
+        payload.metadata_preferences.content_kind = 'episode-collection'
+        payload.seasons_count = 1
+        payload.available_seasons = null
+      } else delete payload.metadata_preferences.content_kind
+    }
+    if (clean.category !== 'anime' || clean.media_format === 'film') delete payload.metadata_preferences.content_kind
+    // Une quantité saisie explicitement permet toujours un choix manuel de l'administrateur.
+    if (clean.seasons_count !== existing?.seasons_count || clean.media_format === 'film' || payload.metadata_preferences.content_kind === 'episode-collection') delete payload.metadata_preferences.seasons_quantity_mode
+    if (payload.seasons_count) { payload.metadata_preferences.seasons_manual = payload.seasons_count; payload.metadata_preferences.seasons_auto = false }
     else { delete payload.metadata_preferences.seasons_manual; payload.metadata_preferences.seasons_auto = false }
     const changedIdentity = clean.source !== existing?.source || clean.source_id !== existing?.source_id
     if (clean.source_id && !['manual', 'scan', 'pdf-list'].includes(clean.source) && (!payload.metadata_preferences.rejected || changedIdentity) && (!payload.metadata_preferences.match || clean.source !== payload.metadata_preferences.match.source || clean.source_id !== payload.metadata_preferences.match.source_id)) {

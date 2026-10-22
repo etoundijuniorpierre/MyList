@@ -2,6 +2,7 @@ import type { CatalogItem, ItemInput, MetadataResult } from './types'
 import { normalizeTitle, titleKey } from './types'
 import { cleanTitle, type ScannedItem } from './folderScan'
 import { availableSeasonNumbers, hasSeasonChoices, validSeasonNumbers } from './seasonSelection'
+import { isEpisodeCollection, usesCommercialSeasons } from './contentFormat'
 
 export function unmatchedAnime(title: string): MetadataResult {
   const cleanTitle = title.trim()
@@ -152,7 +153,9 @@ export function scannedItemInput(row: ScannedItem, existing?: CatalogItem): Item
   const title = existing?.title ?? row.title.trim()
   const seasonsMissing = row.warning?.includes('Saison non indiquée') ?? false
   const numbered = hasSeasonChoices(row) && row.season_numbers?.length === row.seasons_count ? validSeasonNumbers(row.season_numbers) : []
-  const available = numbered.length ? validSeasonNumbers([...(existing ? availableSeasonNumbers(existing) : []), ...numbered]) : existing?.available_seasons ?? null
+  const commercial = existing && usesCommercialSeasons(existing)
+  const collection = existing && isEpisodeCollection(existing)
+  const available = commercial ? availableSeasonNumbers(existing) : collection ? null : numbered.length ? validSeasonNumbers([...(existing ? availableSeasonNumbers(existing) : []), ...numbered]) : existing?.available_seasons ?? null
   const detailsChanged = available?.length && JSON.stringify(available) !== JSON.stringify(existing ? availableSeasonNumbers(existing) : [])
   return {
     category: row.category,
@@ -169,7 +172,7 @@ export function scannedItemInput(row: ScannedItem, existing?: CatalogItem): Item
     source_url: existing?.source_url ?? null,
     active: existing?.active ?? true,
     // Un disque ne retire jamais de saisons : « S04 » seul sur le disque d'hiver ne ramène pas une fiche de 5 saisons à 4.
-    seasons_count: row.category === 'games' ? null : available?.length ? available.length : seasonsMissing ? existing?.seasons_count ?? row.seasons_count
+    seasons_count: collection ? 1 : row.category === 'games' ? null : available?.length ? available.length : seasonsMissing ? existing?.seasons_count ?? row.seasons_count
       : Math.max(row.seasons_count ?? 0, existing?.seasons_count ?? 0) || null,
     game_size_gb: row.category === 'games' ? row.game_size_gb ?? existing?.game_size_gb ?? null : null,
     ...(hasSeasonChoices(row) ? { available_seasons: available } : {}),

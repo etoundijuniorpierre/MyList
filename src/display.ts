@@ -1,4 +1,5 @@
 import { categoryLabel, type CatalogItem, type Category } from './types'
+import { isEpisodeCollection, usesCommercialSeasons } from './contentFormat'
 
 export interface CategoryMeta {
   route: string
@@ -21,8 +22,9 @@ export const categoryMeta: Record<Category, CategoryMeta> = {
 
 export const routeCategory: Record<string, Category> = Object.fromEntries(Object.entries(categoryMeta).map(([key, meta]) => [meta.route, key as Category]))
 
-export function kindLabel(item: Pick<CatalogItem, 'category' | 'media_type' | 'media_format'>) {
+export function kindLabel(item: Pick<CatalogItem, 'category' | 'media_type' | 'media_format'> & Partial<Pick<CatalogItem, 'metadata_preferences'>>) {
   if (item.media_format === 'film') return 'Film d’animation'
+  if (isEpisodeCollection(item)) return 'Collection animée'
   if (item.media_type === 'chinese-drama') return 'Drama chinois'
   if (item.media_type === 'korean-drama') return 'Drama coréen'
   if (item.category === 'anime') return 'Animé'
@@ -30,9 +32,12 @@ export function kindLabel(item: Pick<CatalogItem, 'category' | 'media_type' | 'm
   return categoryLabel(item.category).replace(/s$/, '')
 }
 
-export function measureLabel(item: Pick<CatalogItem, 'category' | 'media_format' | 'seasons_count' | 'seasons_total' | 'game_size_gb'>) {
+export function measureLabel(item: Pick<CatalogItem, 'category' | 'media_format' | 'seasons_count' | 'seasons_total' | 'game_size_gb'> & Partial<Pick<CatalogItem, 'metadata_preferences'>>) {
   if (item.category === 'games') return item.game_size_gb ? `${Number(item.game_size_gb).toLocaleString('fr-FR')} Go` : 'Taille à venir'
   if (item.media_format === 'film') return 'Film'
+  if (isEpisodeCollection(item)) return 'Collection complète'
+  if (usesCommercialSeasons(item)) return `${item.seasons_total} saison${item.seasons_total! > 1 ? 's' : ''}`
+  if (item.category === 'anime' && item.metadata_preferences?.seasons_quantity_mode === 'commercial-total' && item.seasons_count! > item.seasons_total!) return `${item.seasons_count} saisons`
   if (item.seasons_count && item.seasons_total && item.seasons_count > item.seasons_total) return `${item.seasons_total} saison${item.seasons_total > 1 ? 's' : ''} référencée${item.seasons_total > 1 ? 's' : ''} · disponibilité à vérifier`
   if (item.seasons_total && item.seasons_total !== item.seasons_count) {
     if (!item.seasons_count) return `${item.seasons_total} saison${item.seasons_total > 1 ? 's' : ''} au total · disponibilité à confirmer`

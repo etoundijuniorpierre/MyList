@@ -1,4 +1,5 @@
 import type { CatalogItem, GameCountDiscount, GamePriceTier, PriceRule } from './types'
+import { billableSeasonUnits, isEpisodeCollection } from './contentFormat'
 
 export interface ItemPricing { amount: number; currency: string; detail: string }
 
@@ -35,15 +36,15 @@ export function itemPrice(item: CatalogItem, selection: CatalogItem[], rules: Pr
   const standard = positiveAmount(rule?.standard_price)
   if (!rule?.currency || standard === null) return null
   if (priceCategory === 'anime-film') return { amount: standard, currency: rule.currency, detail: `1 film × ${standard}` }
-  const seasons = Number(item.seasons_count)
+  const seasons = billableSeasonUnits(item)
   if (!Number.isInteger(seasons) || seasons < 1) return null
   const totalSeasons = selection.filter((entry) => category === 'series' || category === 'anime'
     ? entry.category === 'series' || (entry.category === 'anime' && entry.media_format !== 'film')
-    : entry.category === category).reduce((sum, entry) => sum + (Number(entry.seasons_count) || 0), 0)
+    : entry.category === category).reduce((sum, entry) => sum + billableSeasonUnits(entry), 0)
   const reduced = positiveAmount(rule.threshold_price)
   const unit = rule.threshold_seasons != null && rule.threshold_seasons >= 2 && totalSeasons >= rule.threshold_seasons && reduced !== null
     ? reduced : standard
-  return { amount: Math.round(unit * seasons * 100) / 100, currency: rule.currency, detail: `${seasons} saison${seasons > 1 ? 's' : ''} × ${unit}` }
+  return { amount: Math.round(unit * seasons * 100) / 100, currency: rule.currency, detail: isEpisodeCollection(item) ? `1 collection × ${unit}` : `${seasons} saison${seasons > 1 ? 's' : ''} × ${unit}` }
 }
 
 /** Un même calcul alimente le panier, la barre de total et le message WhatsApp. */
@@ -80,7 +81,7 @@ export function standardItemPrice(item: CatalogItem, rules: PriceRule[], gameTie
   const amount = positiveAmount(rule?.standard_price)
   if (!rule?.currency || amount === null) return null
   if (item.media_format === 'film') return amount
-  const seasons = Number(item.seasons_count)
+  const seasons = billableSeasonUnits(item)
   return Number.isInteger(seasons) && seasons > 0 ? Math.round(amount * seasons * 100) / 100 : null
 }
 
@@ -97,7 +98,7 @@ export interface DiscountProgress {
 /** Où en est le panier par rapport à chaque palier de remise configuré par l'admin. */
 export function discountProgress(selection: CatalogItem[], rules: PriceRule[], gameDiscount: GameCountDiscount, format: (amount: number, currency: string) => string): DiscountProgress[] {
   const progress: DiscountProgress[] = []
-  const seasonsOf = (filter: (item: CatalogItem) => boolean) => selection.filter(filter).reduce((sum, item) => sum + (Number(item.seasons_count) || 0), 0)
+  const seasonsOf = (filter: (item: CatalogItem) => boolean) => selection.filter(filter).reduce((sum, item) => sum + billableSeasonUnits(item), 0)
   const groups: { key: string; label: string; categories: PriceRule['category'][]; filter: (item: CatalogItem) => boolean }[] = [
     { key: 'series-anime', label: 'Séries et animés', categories: ['series', 'anime'], filter: (item) => item.category === 'series' || (item.category === 'anime' && item.media_format !== 'film') },
     { key: 'novelas', label: 'Novelas', categories: ['novelas'], filter: (item) => item.category === 'novelas' },

@@ -1,7 +1,10 @@
 import type { CatalogItem } from './types'
 import type { Candidate } from './metadataMatch'
+import { isEpisodeCollection } from './contentFormat'
 
 export interface MetadataPreferences {
+  content_kind?: 'episode-collection' | null
+  seasons_quantity_mode?: 'commercial-total'
   seasons_reference?: { count: number; locked: boolean; scheme: string; note: string; source_url: string; checked_at: string; episodes?: number }
   title?: string
   match?: Candidate
@@ -29,7 +32,7 @@ export function retainedCandidate(item: CatalogItem): Candidate | null {
 }
 
 export function needsSeasonLookup(item: CatalogItem, now = Date.now()) {
-  if (item.category === 'games' || item.media_format === 'film') return false
+  if (item.category === 'games' || item.media_format === 'film' || isEpisodeCollection(item)) return false
   if (hasVerifiedSeasonTotal(item)) return false
   const checked = Date.parse(item.seasons_checked_at ?? '')
   const age = item.seasons_total ? 30 * 86400_000 : 86400_000
@@ -47,7 +50,7 @@ export function needsCompletion(item: CatalogItem) {
 }
 
 export function needsSeasonDetails(item: CatalogItem, now = Date.now()) {
-  if (!['series', 'anime'].includes(item.category) || item.media_format === 'film') return false
+  if (!['series', 'anime'].includes(item.category) || item.media_format === 'film' || isEpisodeCollection(item)) return false
   const checked = Date.parse(item.season_details_checked_at ?? '')
   return !Number.isFinite(checked) || now - checked >= (item.season_details_note ? 86400_000 : 30 * 86400_000)
 }

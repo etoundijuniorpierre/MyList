@@ -209,3 +209,20 @@ test('modifier la quantité ne réactive pas une correspondance précédemment r
   assert.equal(db.writes[0].metadata_preferences.rejected, true)
   assert.equal(db.writes[0].metadata_preferences.match, undefined)
 })
+
+test('le format collection est enregistré sans effacer les décisions et peut être retiré manuellement', async () => {
+  const item = row({ metadata_preferences: { title: 'NARUTO', seasons_reference: { count: 2, locked: true }, seasons_quantity_mode: 'commercial-total' } })
+  const db = client(item)
+  await saveCatalogItem(db, { ...item, metadata_preferences: { content_kind: 'episode-collection' } }, item.id, [item], () => {}, () => true, true)
+  assert.equal(db.writes[0].metadata_preferences.content_kind, 'episode-collection')
+  assert.equal(db.writes[0].metadata_preferences.seasons_reference.count, 2)
+  assert.equal(db.writes[0].metadata_preferences.seasons_quantity_mode, undefined)
+  assert.equal(db.writes[0].seasons_count, 1)
+  assert.equal(db.writes[0].available_seasons, null)
+  const collection = { ...item, metadata_preferences: db.writes[0].metadata_preferences }
+  const nextDb = client(collection)
+  const queuedInput = JSON.parse(JSON.stringify({ ...collection, metadata_preferences: { content_kind: null } }))
+  await saveCatalogItem(nextDb, queuedInput, collection.id, [collection], () => {}, () => true, true)
+  assert.equal(nextDb.writes[0].metadata_preferences.content_kind, undefined)
+  assert.equal(nextDb.writes[0].metadata_preferences.seasons_reference.count, 2)
+})

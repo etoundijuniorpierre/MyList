@@ -2,6 +2,7 @@ import type { CatalogItem } from './types'
 import type { MetadataPreferences } from './metadataDecisions'
 import { hasVerifiedSeasonTotal } from './metadataDecisions'
 import type { Candidate } from './metadataMatch'
+import { isEpisodeCollection } from './contentFormat'
 
 export interface CompletionData {
   poster_url?: string
@@ -36,10 +37,13 @@ export function completionPatch(item: CatalogItem, found: CompletionData, extra:
   if ('metadata_preferences' in item && found.seasons_checked_at && !hasVerifiedSeasonTotal(item)) {
     patch.seasons_checked_at = found.seasons_checked_at
     patch.metadata_preferences = { ...item.metadata_preferences, ...(patch.metadata_preferences as MetadataPreferences | undefined), seasons_note: found.seasons_note, seasons_source_url: found.seasons_source_url }
-    if (found.seasons_total) {
+    if (Number.isInteger(found.seasons_total) && found.seasons_total! >= 1 && found.seasons_total! <= 999) {
       patch.seasons_total = found.seasons_total
-      // Un total public ne prouve pas que toutes les saisons sont disponibles à la vente.
-      if (item.category !== 'games' && item.media_format !== 'film' && !item.available_seasons?.length && !item.metadata_preferences?.seasons_manual && (!item.seasons_count || item.metadata_preferences?.seasons_auto)) {
+      if (item.category === 'anime' && item.media_format !== 'film' && !isEpisodeCollection(item) && item.metadata_preferences?.seasons_quantity_mode === 'commercial-total') {
+        patch.seasons_count = found.seasons_total
+        patch.available_seasons = Array.from({ length: found.seasons_total! }, (_, i) => i + 1)
+        patch.metadata_preferences = { ...(patch.metadata_preferences as MetadataPreferences), seasons_auto: true }
+      } else if (item.category !== 'games' && item.media_format !== 'film' && !isEpisodeCollection(item) && !item.available_seasons?.length && !item.metadata_preferences?.seasons_manual && (!item.seasons_count || item.metadata_preferences?.seasons_auto)) {
         patch.seasons_count = found.seasons_total
         patch.metadata_preferences = { ...(patch.metadata_preferences as MetadataPreferences), seasons_auto: true }
       }

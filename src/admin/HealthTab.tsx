@@ -95,6 +95,7 @@ export function HealthTab({ items, posterJobRunning, confirm, onChanged, onUpdat
           title_key: titleKey(saga.category, mediaType, work.title, format),
           synopsis: null, poster_url: null, genres: [], year: null, source: 'manual', source_id: null, source_url: null, active: true,
           seasons_count: saga.category === 'games' || work.format === 'film' ? null : work.seasons ?? 1, game_size_gb: null,
+          ...(work.collection ? { metadata_preferences: { content_kind: 'episode-collection' as const } } : {}),
         }
       })
       const newIds: string[] = []

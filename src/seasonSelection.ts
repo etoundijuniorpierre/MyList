@@ -1,15 +1,17 @@
 import type { CartItem, CatalogItem, CatalogSeason } from './types'
+import { isEpisodeCollection, usesCommercialSeasons } from './contentFormat'
 
 export interface CartSelection { ids: string[]; seasons: Record<string, number[]> }
 export const CART_KEY = 'mylist-cart-v2'
-export function hasSeasonChoices(item: Pick<CatalogItem, 'category' | 'media_format'>) {
-  return (item.category === 'series' || item.category === 'anime') && item.media_format !== 'film'
+export function hasSeasonChoices(item: Pick<CatalogItem, 'category' | 'media_format'> & Partial<Pick<CatalogItem, 'metadata_preferences'>>) {
+  return (item.category === 'series' || item.category === 'anime') && item.media_format !== 'film' && !isEpisodeCollection(item)
 }
 export function validSeasonNumbers(value: unknown): number[] {
   return Array.isArray(value) ? [...new Set(value.filter((n): n is number => Number.isInteger(n) && n >= 1 && n <= 999))].sort((a, b) => a - b) : []
 }
 export function availableSeasonNumbers(item: CatalogItem): number[] {
   if (!hasSeasonChoices(item)) return []
+  if (usesCommercialSeasons(item)) return Array.from({ length: item.seasons_total! }, (_, i) => i + 1)
   if (Array.isArray(item.available_seasons)) return validSeasonNumbers(item.available_seasons)
   const count = item.seasons_count
   return Number.isInteger(count) && count! > 0 && count! <= 999 ? Array.from({ length: count! }, (_, i) => i + 1) : []
@@ -75,6 +77,7 @@ export function cartItems(items: CatalogItem[], cart: CartSelection): CartItem[]
   })
 }
 export function seasonSelectionLabel(item: CatalogItem) {
+  if (isEpisodeCollection(item)) return 'Collection complète'
   const cart = item as CartItem
   const numbers = cart.cart_seasons
   if (!numbers?.length) return ''

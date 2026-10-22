@@ -70,6 +70,10 @@ Le numéro WhatsApp se règle dans **Administration → WhatsApp**, au format in
 - **Jeux PC** : définir des paliers de taille en Go, par exemple 1–49 Go et 50–100 Go, chacun avec son prix. La taille d’un jeu est arrondie au Go supérieur pour déterminer le palier. On peut aussi définir un nombre minimum de jeux dans la sélection et un prix fixe par jeu qui remplace alors les prix par taille.
 - Une même devise est utilisée pour toute la sélection. Les saisons et la taille de chaque fiche restent corrigeables dans l’administration.
 
+Pour les animés validés avec un découpage commercial, le nombre affiché correspond à toutes les saisons de ce découpage. Le détail permet de choisir l’intégrale ou certaines saisons ; le prix porte uniquement sur les saisons choisies. Un nouvel import conserve ce découpage validé au lieu de le remplacer par le nombre de dossiers trouvés.
+
+Dans **Modifier la fiche**, l’option **Collection d’OAV ou de courts épisodes** vend l’ensemble au tarif d’une saison d’animé. La collection compte pour une unité dans les remises et dans le message WhatsApp. Les films gardent leur tarif indépendant. Les préréglages de saga distinguent ces collections, les séries et les films ; chaque œuvre conserve son propre total, sans recopier celui de toute la franchise.
+
 ## Espace admin
 
 L'administration est accessible par le lien discret « Espace privé » en pied de page (aucun lien dans la navigation publique) et n'est pas indexée par les moteurs de recherche.

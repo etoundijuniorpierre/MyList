@@ -181,3 +181,32 @@ test('les choix de l’admin sur les regroupements sont respectés', () => {
   assert.equal(monogatari.filter((work) => work.format === 'film').length, 4)
   assert.equal(sagaPreset('Dragon Ball Z Films').works.length, 17)
 })
+
+test('Fate distingue ses séries, films et collections et conserve ce choix après édition de la liste', () => {
+  const { sagaPreset, formatWorks, parseWorks } = require('../src/admin/sagaPresets.ts')
+  const grandOrder = sagaPreset('Fate Grand Order SAGA').works
+  assert.equal(grandOrder.find(work => /Babylonia/.test(work.title)).seasons, 1)
+  assert.equal(grandOrder.filter(work => /Camelot/.test(work.title) && work.format === 'film').length, 2)
+  assert.equal(grandOrder.find(work => /Solomon/.test(work.title)).format, 'film')
+  assert.equal(grandOrder.find(work => /Fujimaru/.test(work.title)).seasons, 4)
+  assert.deepEqual(parseWorks(formatWorks(grandOrder)), grandOrder)
+  assert.deepEqual(parseWorks('Steins;Gate\nFate/Grand Order: Camelot — Wandering; Agateram ; film'), [
+    { title: 'Steins;Gate', format: 'series', seasons: 1 }, { title: 'Fate/Grand Order: Camelot — Wandering; Agateram', format: 'film', seasons: null },
+  ])
+  const monogatari = sagaPreset('Monogatari SAGA').works
+  assert.equal(monogatari.find(work => work.title === 'Bakemonogatari').seasons, 1)
+  assert.equal(monogatari.find(work => work.title === 'Owarimonogatari').seasons, 2)
+  assert.equal(monogatari.find(work => work.title === 'Koyomimonogatari').collection, true)
+})
+
+test('les films Naruto restent onze films distincts et ne deviennent pas des saisons', () => {
+  const { sagaPreset, formatWorks, parseWorks } = require('../src/admin/sagaPresets.ts')
+  const movies = sagaPreset('Naruto Films').works
+  assert.equal(movies.length, 11)
+  assert.equal(new Set(movies.map(work => work.title)).size, 11)
+  assert.ok(movies.every(work => work.format === 'film' && work.seasons === null))
+  assert.ok(movies.some(work => work.title === 'The Last: Naruto the Movie'))
+  assert.ok(movies.some(work => work.title === 'Boruto: Naruto the Movie'))
+  assert.deepEqual(parseWorks(formatWorks(movies)), movies)
+  assert.equal(sagaPreset('Naruto Shippuden Films').works.length, 8)
+})
