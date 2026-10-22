@@ -21,7 +21,8 @@ test('le catalogue distingue la disponibilité du total sans changer les quantit
   assert.equal(measureLabel(parent), '1 disponible / 4 saisons')
   assert.equal(parent.seasons_count, 1)
   assert.equal(cartItems([parent], { ids: ['a'], seasons: {} })[0].seasons_count, 1)
-  assert.equal(measureLabel(item({ seasons_count: 4, seasons_total: 2 })), '4 disponibles · total à vérifier')
+  assert.equal(measureLabel(item({ seasons_count: 4, seasons_total: 2 })), '2 saisons référencées · disponibilité à vérifier')
+  assert.equal(measureLabel(item({ seasons_count: 2, seasons_total: 1 })), '1 saison référencée · disponibilité à vérifier')
   assert.equal(measureLabel(item({ seasons_count: null, seasons_total: 4 })), '4 saisons au total · disponibilité à confirmer')
 })
 
